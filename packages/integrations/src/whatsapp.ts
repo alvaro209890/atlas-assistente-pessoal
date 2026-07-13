@@ -1,0 +1,383 @@
+import makeWASocket, {
+  BufferJSON,
+  DisconnectReason,
+  initAuthCreds,
+  jidNormalizedUser,
+  proto,
+  type AuthenticationState,
+  type SignalDataTypeMap,
+  type WASocket,
+} from "@whiskeysockets/baileys";
+import pino from "pino";
+import QRCode from "qrcode";
+
+import { IntegrationError } from "./errors.js";
+
+export interface BaileysAuthRepository {
+  get(userId: string, category: string, key: string): Promise<string | null>;
+  set(userId: string, category: string, key: string, value: string | null): Promise<void>;
+  clearUser(userId: string): Promise<void>;
+}
+
+export interface SelectedChatRepository {
+  isSelected(userId: string, chatJid: string): Promise<boolean>;
+}
+
+export type WhatsAppSessionEvent =
+  | { type: "qr"; userId: string; qr: string; dataUrl: string }
+  | { type: "connected"; userId: string; selfJid: string; displayName?: string | null }
+  | { type: "disconnected"; userId: string; retrying: boolean }
+  | { type: "logged_out"; userId: string }
+  | { type: "error"; userId: string; error: Error }
+  | {
+      type: "conversations";
+      userId: string;
+      conversations: WhatsAppConversationCatalogEntry[];
+    }
+  | {
+      type: "text_message";
+      userId: string;
+      message: {
+        id: string;
+        chatJid: string;
+        senderJid: string;
+        senderName: string | null;
+        sentAt: string;
+        fromMe: boolean;
+        text: string;
+      };
+    };
+
+export type WhatsAppEventHandler = (event: WhatsAppSessionEvent) => void | Promise<void>;
+
+export interface WhatsAppConversationCatalogEntry {
+  jid: string;
+  name: string | null;
+  isGroup: boolean;
+  conversationTimestamp: string | null;
+}
+
+function serialize(value: unknown): string {
+  return JSON.stringify(value, BufferJSON.replacer);
+}
+
+function deserialize<T>(value: string): T {
+  return JSON.parse(value, BufferJSON.reviver) as T;
+}
+
+export async function createPersistentAuthenticationState(
+  userId: string,
+  repository: BaileysAuthRepository,
+): Promise<{ state: AuthenticationState; saveCreds: () => Promise<void> }> {
+  const storedCreds = await repository.get(userId, "auth", "creds");
+  const creds = storedCreds ? deserialize<AuthenticationState["creds"]>(storedCreds) : initAuthCreds();
+
+  const state: AuthenticationState = {
+    creds,
+    keys: {
+      get: async <T extends keyof SignalDataTypeMap>(type: T, ids: string[]) => {
+        const result: { [id: string]: SignalDataTypeMap[T] } = {};
+        await Promise.all(
+          ids.map(async (id) => {
+            const stored = await repository.get(userId, `key:${String(type)}`, id);
+            if (!stored) return;
+            const value = deserialize<SignalDataTypeMap[T]>(stored);
+            if (type === "app-state-sync-key") {
+              result[id] = proto.Message.AppStateSyncKeyData.fromObject(
+                value as unknown as Record<string, unknown>,
+              ) as unknown as SignalDataTypeMap[T];
+              return;
+            }
+            result[id] = value;
+          }),
+        );
+        return result;
+      },
+      set: async (data) => {
+        const writes: Promise<void>[] = [];
+        for (const category of Object.keys(data) as (keyof SignalDataTypeMap)[]) {
+          const entries = data[category];
+          if (!entries) continue;
+          for (const [id, value] of Object.entries(entries)) {
+            writes.push(
+              repository.set(
+                userId,
+                `key:${String(category)}`,
+                id,
+                value == null ? null : serialize(value),
+              ),
+            );
+          }
+        }
+        await Promise.all(writes);
+      },
+    },
+  };
+
+  return {
+    state,
+    saveCreds: () => repository.set(userId, "auth", "creds", serialize(creds)),
+  };
+}
+
+export function extractTextMessageContent(
+  message: proto.IMessage | null | undefined,
+): string | null {
+  if (!message) return null;
+  const text =
+    message.conversation ??
+    message.extendedTextMessage?.text ??
+    message.imageMessage?.caption ??
+    message.videoMessage?.caption ??
+    message.documentMessage?.caption;
+  const normalized = text?.trim();
+  return normalized ? normalized : null;
+}
+
+export function createQrDataUrl(qr: string): Promise<string> {
+  return QRCode.toDataURL(qr, {
+    type: "image/png",
+    width: 320,
+    margin: 2,
+  });
+}
+
+export function shouldProcessWhatsAppChat(
+  chatJid: string,
+  selfJid: string | null,
+  selected: boolean,
+): boolean {
+  return selected || (selfJid !== null && jidNormalizedUser(chatJid) === jidNormalizedUser(selfJid));
+}
+
+function mapConversationCatalog(items: readonly unknown[]): WhatsAppConversationCatalogEntry[] {
+  const mapped: WhatsAppConversationCatalogEntry[] = [];
+  for (const raw of items) {
+    const item = raw as {
+      id?: unknown;
+      name?: unknown;
+      subject?: unknown;
+      conversationTimestamp?: unknown;
+    };
+    if (typeof item.id !== "string" || !item.id) continue;
+    const jid = jidNormalizedUser(item.id);
+    const timestamp = item.conversationTimestamp;
+    mapped.push({
+      jid,
+      name:
+        typeof item.name === "string"
+          ? item.name
+          : typeof item.subject === "string"
+            ? item.subject
+            : null,
+      isGroup: jid.endsWith("@g.us"),
+      conversationTimestamp:
+        timestamp == null ? null : unixTimestampToIso(timestamp),
+    });
+  }
+  return mapped;
+}
+
+function unixTimestampToIso(timestamp: unknown): string {
+  const value = Number(timestamp ?? Math.floor(Date.now() / 1_000));
+  return new Date(value * 1_000).toISOString();
+}
+
+function statusCode(error: unknown): number | null {
+  const code = (error as { output?: { statusCode?: unknown } })?.output?.statusCode;
+  return typeof code === "number" ? code : null;
+}
+
+export interface BaileysSessionManagerOptions {
+  authRepository: BaileysAuthRepository;
+  selectedChats: SelectedChatRepository;
+  onEvent: WhatsAppEventHandler;
+}
+
+export class BaileysSessionManager {
+  private readonly sockets = new Map<string, WASocket>();
+  private readonly starting = new Map<string, Promise<void>>();
+  private readonly intentionalStops = new Set<string>();
+  private readonly silentStops = new Set<string>();
+  private readonly logger = pino({ level: "silent" });
+
+  constructor(private readonly options: BaileysSessionManagerOptions) {}
+
+  async start(userId: string): Promise<void> {
+    if (this.sockets.has(userId)) return;
+    this.intentionalStops.delete(userId);
+    this.silentStops.delete(userId);
+    const active = this.starting.get(userId);
+    if (active) return active;
+    const startPromise = this.open(userId).finally(() => this.starting.delete(userId));
+    this.starting.set(userId, startPromise);
+    return startPromise;
+  }
+
+  private async open(userId: string): Promise<void> {
+    const previous = this.sockets.get(userId);
+    previous?.end(undefined);
+
+    const { state, saveCreds } = await createPersistentAuthenticationState(
+      userId,
+      this.options.authRepository,
+    );
+    const socket = makeWASocket({
+      auth: state,
+      logger: this.logger,
+      printQRInTerminal: false,
+      markOnlineOnConnect: false,
+      syncFullHistory: false,
+      generateHighQualityLinkPreview: false,
+    });
+    this.sockets.set(userId, socket);
+
+    socket.ev.on("creds.update", () => {
+      void saveCreds().catch((error) => this.emitError(userId, error));
+    });
+
+    socket.ev.on("connection.update", (update) => {
+      void (async () => {
+        if (update.qr) {
+          const dataUrl = await createQrDataUrl(update.qr);
+          await this.options.onEvent({ type: "qr", userId, qr: update.qr, dataUrl });
+        }
+        if (update.connection === "open") {
+          const selfJid = socket.user?.id ? jidNormalizedUser(socket.user.id) : null;
+          if (!selfJid) throw new IntegrationError("WhatsApp connected without a self JID", true);
+          await this.options.onEvent({
+            type: "connected",
+            userId,
+            selfJid,
+            displayName: socket.user?.name?.trim() || null,
+          });
+        }
+        if (update.connection === "close") {
+          if (this.intentionalStops.delete(userId)) {
+            this.sockets.delete(userId);
+            if (!this.silentStops.delete(userId)) {
+              await this.options.onEvent({ type: "disconnected", userId, retrying: false });
+            }
+            return;
+          }
+          const loggedOut = statusCode(update.lastDisconnect?.error) === DisconnectReason.loggedOut;
+          this.sockets.delete(userId);
+          if (loggedOut) {
+            await this.options.authRepository.clearUser(userId);
+            await this.options.onEvent({ type: "logged_out", userId });
+          } else {
+            await this.options.onEvent({ type: "disconnected", userId, retrying: true });
+            setTimeout(() => void this.start(userId).catch((error) => this.emitError(userId, error)), 2_000);
+          }
+        }
+      })().catch((error) => this.emitError(userId, error));
+    });
+
+    const emitConversations = async (items: readonly unknown[]) => {
+      const conversations = mapConversationCatalog(items);
+      if (conversations.length > 0) {
+        await this.options.onEvent({ type: "conversations", userId, conversations });
+      }
+    };
+
+    socket.ev.on("messaging-history.set", ({ chats }) => {
+      void emitConversations(chats).catch((error) => this.emitError(userId, error));
+    });
+    socket.ev.on("chats.upsert", (chats) => {
+      void emitConversations(chats).catch((error) => this.emitError(userId, error));
+    });
+    socket.ev.on("chats.update", (chats) => {
+      void emitConversations(chats).catch((error) => this.emitError(userId, error));
+    });
+
+    socket.ev.on("messages.upsert", ({ messages }) => {
+      void (async () => {
+        for (const item of messages) {
+          const chatJid = item.key.remoteJid ? jidNormalizedUser(item.key.remoteJid) : null;
+          const messageId = item.key.id;
+          if (!chatJid || !messageId) continue;
+          const selfJid = socket.user?.id ? jidNormalizedUser(socket.user.id) : null;
+          const selected = await this.options.selectedChats.isSelected(userId, chatJid);
+          if (!shouldProcessWhatsAppChat(chatJid, selfJid, selected)) continue;
+          const text = extractTextMessageContent(item.message);
+          if (!text) continue;
+          const senderJid = jidNormalizedUser(item.key.participant ?? chatJid);
+          await this.options.onEvent({
+            type: "text_message",
+            userId,
+            message: {
+              id: messageId,
+              chatJid,
+              senderJid,
+              senderName: item.pushName?.trim() || null,
+              sentAt: unixTimestampToIso(item.messageTimestamp),
+              fromMe: item.key.fromMe === true,
+              text,
+            },
+          });
+        }
+      })().catch((error) => this.emitError(userId, error));
+    });
+
+    if (this.intentionalStops.has(userId)) socket.end(undefined);
+  }
+
+  private async emitError(userId: string, error: unknown): Promise<void> {
+    await this.options.onEvent({
+      type: "error",
+      userId,
+      error: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+
+  async stop(userId: string): Promise<void> {
+    this.intentionalStops.add(userId);
+    const socket = this.sockets.get(userId);
+    if (!socket) return;
+    socket.end(undefined);
+    this.sockets.delete(userId);
+  }
+
+  async suspend(userId: string): Promise<void> {
+    this.intentionalStops.add(userId);
+    this.silentStops.add(userId);
+    const socket = this.sockets.get(userId);
+    if (!socket) return;
+    socket.end(undefined);
+    this.sockets.delete(userId);
+  }
+
+  hasSession(userId: string): boolean {
+    return this.sockets.has(userId) || this.starting.has(userId);
+  }
+
+  listSessionUserIds(): string[] {
+    return [...new Set([...this.sockets.keys(), ...this.starting.keys()])];
+  }
+
+  async logout(userId: string): Promise<void> {
+    const socket = this.sockets.get(userId);
+    if (socket) await socket.logout();
+    await this.options.authRepository.clearUser(userId);
+    this.sockets.delete(userId);
+  }
+
+  getSelfJid(userId: string): string {
+    const socket = this.sockets.get(userId);
+    const selfJid = socket?.user?.id ? jidNormalizedUser(socket.user.id) : null;
+    if (!selfJid) throw new IntegrationError("WhatsApp session is not connected", true);
+    return selfJid;
+  }
+
+  async sendText(userId: string, destinationJid: string, text: string): Promise<string> {
+    const socket = this.sockets.get(userId);
+    if (!socket) throw new IntegrationError("WhatsApp session is not connected", true);
+    const sent = await socket.sendMessage(jidNormalizedUser(destinationJid), { text });
+    if (!sent?.key.id) throw new IntegrationError("WhatsApp did not return a message ID", true);
+    return sent.key.id;
+  }
+
+  sendSelf(userId: string, text: string): Promise<string> {
+    return this.sendText(userId, this.getSelfJid(userId), text);
+  }
+}

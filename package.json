@@ -1,0 +1,37 @@
+{
+  "name": "atlas-assistente-pessoal",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Atlas: assistente pessoal multiusuário com WhatsApp, Trello, lembretes e Segundo Cérebro.",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24.0.0",
+    "npm": ">=10.0.0"
+  },
+  "packageManager": "npm@10.9.4",
+  "scripts": {
+    "dev": "concurrently -k -n API,WORKER,WEB -c cyan,magenta,blue \"npm run dev -w @atlas/api\" \"npm run dev -w @atlas/worker\" \"npm run dev -w @atlas/web\"",
+    "dev:api": "npm run dev -w @atlas/api",
+    "dev:worker": "npm run dev -w @atlas/worker",
+    "dev:web": "npm run dev -w @atlas/web",
+    "build:packages": "npm run build -w @atlas/shared && npm run build -w @atlas/database && npm run build -w @atlas/integrations",
+    "build:apps": "npm run build -w @atlas/api && npm run build -w @atlas/worker && npm run build -w @atlas/web",
+    "build": "npm run build:packages && npm run build:apps",
+    "test": "npm run build:packages && npm run test -w @atlas/shared && npm run test -w @atlas/database && npm run test -w @atlas/integrations && npm run test -w @atlas/api && npm run test -w @atlas/worker && npm run test -w @atlas/web",
+    "typecheck": "npm run build:packages && npm run typecheck -w @atlas/api && npm run typecheck -w @atlas/worker && npm run typecheck -w @atlas/web",
+    "check": "npm run typecheck && npm run test && npm run build",
+    "verify:release": "node scripts/verify-release.mjs",
+    "release:check": "npm run check && npm run verify:release",
+    "db:migrate": "npm run migrate -w @atlas/database",
+    "db:seed": "npm run seed -w @atlas/database"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "typescript": "^7.0.2"
+  },
+  "license": "MIT"
+}
