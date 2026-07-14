@@ -78,9 +78,12 @@ O serviço `migrate` aplica as migrações antes de iniciar a API e o worker.
 - `TRELLO_API_KEY` e `TRELLO_CALLBACK_URL`: autorização delegada do Trello.
 - `AI_CONFIDENCE_THRESHOLD`: padrão `0.70`.
 - `MEMORY_CONFIDENCE_THRESHOLD`: padrão `0.60`; controla notas e observações sem reduzir a segurança das tarefas.
+- `CONVERSATION_CONTEXT_IDLE_MINUTES`: padrão `15`; após esse tempo sem mensagens, o próximo lote inicia uma nova conversa de contexto.
+- `AI_CONTEXT_MAX_MESSAGES` e `AI_CONTEXT_MAX_CHARS`: limites determinísticos de contexto (padrões `20` e `18000`) para conter custo de tokens.
+- `DEEPSEEK_MAX_OUTPUT_TOKENS`: teto de saída estruturada (padrão `4096`).
 - `RUN_LIVE_AI_TESTS`: habilita testes reais e cobrados somente quando definido como `1`.
 
-O modelo é fixado em `deepseek-v4-flash`, com `thinking.type=enabled`, `reasoning_effort=medium` e sem `temperature`.
+O modelo é fixado em `deepseek-v4-flash`, com `thinking.type=enabled`, `reasoning_effort=medium` e sem `temperature`. O Atlas limita o contexto antes de chamar o provedor, preservando mensagens recentes, memória relevante e evidências; não há crescimento ilimitado conforme o histórico aumenta.
 
 ## Validação
 

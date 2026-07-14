@@ -193,7 +193,10 @@ async function main(): Promise<void> {
       }
       if (await repository.isAutomationEnabled(userId, "message_ingestion")) batcher.add(message);
       try {
-        const conversation = await repository.buildAssistantConversation(userId);
+        const conversation = await repository.buildAssistantConversation(
+          userId,
+          config.CONVERSATION_CONTEXT_IDLE_MINUTES,
+        );
         const answer = await deepSeek.answerAssistant(conversation);
         const outboxId = await repository.enqueueNotification(
           { userId, kind: "admin_message", title: "Atlas", body: answer },
@@ -245,6 +248,8 @@ async function main(): Promise<void> {
     apiKey: config.DEEPSEEK_API_KEY,
     baseURL: config.DEEPSEEK_BASE_URL,
     model: config.DEEPSEEK_MODEL,
+    timeoutMs: config.DEEPSEEK_TIMEOUT_MS,
+    maxOutputTokens: config.DEEPSEEK_MAX_OUTPUT_TOKENS,
   });
   const notificationChannel = new WhatsAppMotherNotificationChannel(motherSessions, repository);
   await registerHandlers({ boss, repository, deepSeek, notificationChannel, config });

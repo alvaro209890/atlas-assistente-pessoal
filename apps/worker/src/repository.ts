@@ -17,6 +17,7 @@ import {
 } from "@atlas/integrations";
 import {
   AI_PROMPT_VERSION,
+  DEFAULT_CONVERSATION_CONTEXT_IDLE_MINUTES,
   aiDecisionSchema,
   aiCommitmentSchema,
   aiTaskSchema,
@@ -76,6 +77,12 @@ export interface TrelloRuntimeConfig {
   boardConfigId: string;
   connectionId: string;
   listRoles: TrelloListRoleMap;
+}
+
+export interface AiContextOptions {
+  idleMinutes?: number;
+  maxRecentMessages?: number;
+  maxContextChars?: number;
 }
 
 export interface OutboxRecord {
@@ -616,7 +623,22 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
     userId: string,
     chatJid: string,
     batchMessages: readonly NormalizedMessage[],
+    options: AiContextOptions = {},
   ): Promise<AiContext> {
+    const idleMinutes = options.idleMinutes ?? DEFAULT_CONVERSATION_CONTEXT_IDLE_MINUTES;
+    const firstBatchAt = [...batchMessages]
+      .map((message) => new Date(message.sentAt))
+      .filter((date) => !Number.isNaN(date.getTime()))
+      .sort((left, right) => left.getTime() - right.getTime())[0] ?? new Date();
+    const contextSince = new Date(firstBatchAt.getTime() - idleMinutes * 60_000);
+    const previousMessage = await this.database.query<{ sent_at: Date }>(
+      `SELECT sent_at FROM whatsapp_messages
+       WHERE user_id=$1 AND chat_jid=$2 AND sent_at<$3
+       ORDER BY sent_at DESC LIMIT 1`,
+      [userId, chatJid, firstBatchAt],
+    );
+    const startsNewConversation = !previousMessage.rows[0]
+      || firstBatchAt.getTime() - previousMessage.rows[0].sent_at.getTime() > idleMinutes * 60_000;
     const recent = await this.database.query<{
       external_message_id: string;
       sender_jid: string;
@@ -632,9 +654,9 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
               wm.metadata,wm.quoted_external_message_id
        FROM whatsapp_messages wm
        LEFT JOIN monitored_chats mc ON mc.id = wm.monitored_chat_id
-       WHERE wm.user_id = $1 AND wm.chat_jid = $2
-       ORDER BY wm.sent_at DESC LIMIT 15`,
-      [userId, chatJid],
+       WHERE wm.user_id = $1 AND wm.chat_jid = $2 AND wm.sent_at >= $3
+       ORDER BY wm.sent_at DESC LIMIT 60`,
+      [userId, chatJid, contextSince],
     );
     const settings = await this.database.query<{
       timezone: string;
@@ -689,7 +711,7 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
       customInstructions:
         personalization.customInstructions,
     };
-    const queryText = batchMessages.map((item) => item.text).join(" ").slice(0, 8_000);
+    const queryText = batchMessages.map((item) => item.text).join(" ").slice(0, 3_000);
     const memoriesResult = await this.database.query<{
       type: KnownMemory["nodeType"];
       title: string;
@@ -697,19 +719,37 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
       aliases: string[];
       tags: string[];
     }>(
-      `SELECT type, title,
-              concat_ws(E'\n',NULLIF(manual_content,''),NULLIF(generated_content,'')) AS content,
-              aliases, tags
-       FROM brain_nodes
-       WHERE user_id = $1 AND status = 'active'
-         AND (
-           search_vector @@ websearch_to_tsquery('portuguese', $2)
-           OR similarity(title, left($2, 1000)) > 0.18
-         )
-       ORDER BY ts_rank_cd(search_vector, websearch_to_tsquery('portuguese', $2)) DESC,
-                similarity(title, left($2, 1000)) DESC,
-                updated_at DESC
-       LIMIT 8`,
+      `WITH ranked AS (
+         SELECT id,type,title,
+                concat_ws(E'\n',NULLIF(manual_content,''),NULLIF(generated_content,'')) AS content,
+                aliases,tags,
+                ts_rank_cd(search_vector,websearch_to_tsquery('portuguese',$2)) AS score
+         FROM brain_nodes
+         WHERE user_id=$1 AND status='active' AND type<>'task' AND btrim($2)<>''
+           AND (
+             search_vector @@ websearch_to_tsquery('portuguese',$2)
+             OR similarity(title,left($2,1000))>0.18
+           )
+         ORDER BY score DESC,similarity(title,left($2,1000)) DESC,updated_at DESC
+         LIMIT 5
+       ), related_candidates AS (
+         SELECT DISTINCT ON (node.id) node.id,node.type,node.title,
+                concat_ws(E'\n',NULLIF(node.manual_content,''),NULLIF(node.generated_content,'')) AS content,
+                node.aliases,node.tags,edge.weight,node.updated_at
+         FROM ranked seed
+         JOIN brain_edges edge ON edge.user_id=$1
+           AND (edge.from_node_id=seed.id OR edge.to_node_id=seed.id)
+         JOIN brain_nodes node ON node.user_id=$1
+           AND node.id=CASE WHEN edge.from_node_id=seed.id THEN edge.to_node_id ELSE edge.from_node_id END
+         WHERE node.status='active' AND node.type<>'task'
+         ORDER BY node.id,edge.weight DESC,node.updated_at DESC
+       ), related AS (
+         SELECT id,type,title,content,aliases,tags FROM related_candidates
+         ORDER BY weight DESC,updated_at DESC LIMIT 3
+       )
+       SELECT type,title,content,aliases,tags FROM ranked
+       UNION ALL
+       SELECT type,title,content,aliases,tags FROM related`,
       [userId, queryText],
     );
     const cardsResult = await this.database.query<{
@@ -833,14 +873,16 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
        ) allowed WHERE member_id IS NOT NULL AND btrim(member_id)<>''`,
       [userId],
     );
-    const previous = await this.database.query<{ summary: string | null }>(
-      `SELECT NULLIF(output->>'conversationSummary', '') AS summary
-       FROM ai_runs
-       WHERE user_id = $1 AND purpose = 'whatsapp_triage' AND status = 'succeeded'
-         AND input->>'chatJid' = $2
-       ORDER BY completed_at DESC LIMIT 1`,
-      [userId, chatJid],
-    );
+    const previous = startsNewConversation
+      ? null
+      : await this.database.query<{ summary: string | null }>(
+          `SELECT NULLIF(output->>'conversationSummary', '') AS summary
+           FROM ai_runs
+           WHERE user_id = $1 AND purpose = 'whatsapp_triage' AND status = 'succeeded'
+             AND input->>'chatJid' = $2
+           ORDER BY completed_at DESC LIMIT 1`,
+          [userId, chatJid],
+        );
     const classificationStateResult = await this.database.query<{
       enabled: boolean;
       conversation_group_id: string | null;
@@ -970,7 +1012,7 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
       now: new Date(),
       chatJid,
       chatName: recent.rows[0]?.display_name ?? null,
-      previousSummary: previous.rows[0]?.summary ?? null,
+      previousSummary: previous?.rows[0]?.summary ?? null,
       preferences,
       messages: [...merged.values()],
       isGroupChat: chatJid.endsWith("@g.us"),
@@ -993,6 +1035,8 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
       allowedListKeys,
       allowedTrelloMemberIds: allowedMembers.rows.map((row) => row.member_id),
       isSelfChat: selfChatResult.rows[0]?.is_self_chat ?? false,
+      ...(options.maxRecentMessages !== undefined ? { maxRecentMessages: options.maxRecentMessages } : {}),
+      ...(options.maxContextChars !== undefined ? { maxContextChars: options.maxContextChars } : {}),
     });
   }
 
@@ -1159,6 +1203,27 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
         );
         changed += 1;
       }
+      // Quando uma nota/decisão e uma entidade durável usam a mesma mensagem
+      // como evidência, a ligação "about" é factual (não uma inferência do
+      // modelo). Isso deixa o grafo navegável mesmo se a IA omitir relations.
+      await client.query(
+        `INSERT INTO brain_edges (user_id,from_node_id,to_node_id,relation_type,weight,provenance)
+         SELECT DISTINCT $1,source.node_id,entity.node_id,'about',0.78,'evidence'
+         FROM brain_node_sources source
+         JOIN brain_nodes note ON note.id=source.node_id AND note.user_id=source.user_id
+         JOIN brain_node_sources entity_source
+           ON entity_source.user_id=source.user_id
+          AND entity_source.source_kind=source.source_kind
+          AND entity_source.source_id=source.source_id
+         JOIN brain_nodes entity ON entity.id=entity_source.node_id AND entity.user_id=entity_source.user_id
+         WHERE source.user_id=$1 AND source.node_id=ANY($2::uuid[])
+           AND note.type IN ('note','decision','reference','procedure')
+           AND entity.type IN ('person','project','group','entity')
+           AND source.node_id<>entity.node_id
+         ON CONFLICT (user_id,from_node_id,to_node_id,relation_type)
+         DO UPDATE SET weight=GREATEST(brain_edges.weight,EXCLUDED.weight),provenance='evidence'`,
+        [userId, [...new Set(nodeIds.values())]],
+      );
       for (const memory of memories) {
         const durableEntity = ["person", "project", "group", "entity"].includes(memory.nodeType);
         const evidenceKey = createHash("sha256")
@@ -1322,7 +1387,10 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
     return result;
   }
 
-  async buildAssistantConversation(userId: string): Promise<AssistantConversationInput> {
+  async buildAssistantConversation(
+    userId: string,
+    idleMinutes = DEFAULT_CONVERSATION_CONTEXT_IDLE_MINUTES,
+  ): Promise<AssistantConversationInput> {
     const user = await this.database.query<{ preferred_name: string }>(
       "SELECT preferred_name FROM users WHERE id=$1",
       [userId],
@@ -1334,10 +1402,10 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
       `SELECT direction,body FROM (
          SELECT direction,body,sent_at,id
          FROM platform_whatsapp_messages
-         WHERE user_id=$1
-         ORDER BY sent_at DESC,id DESC LIMIT 20
+         WHERE user_id=$1 AND sent_at>=now()-make_interval(mins => $2)
+         ORDER BY sent_at DESC,id DESC LIMIT 12
        ) recent ORDER BY sent_at,id`,
-      [userId],
+      [userId, idleMinutes],
     );
     const tasks = await this.database.query<{
       id: string;
@@ -1347,13 +1415,13 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
     }>(
       `SELECT id::text,title,status,due_at FROM canonical_tasks
        WHERE user_id=$1 AND status NOT IN ('done','cancelled','merged')
-       ORDER BY due_at NULLS LAST,updated_at DESC LIMIT 20`,
+       ORDER BY due_at NULLS LAST,updated_at DESC LIMIT 12`,
       [userId],
     );
     const memories = await this.database.query<{ title: string; content: string }>(
       `SELECT title,concat_ws(E'\n',NULLIF(manual_content,''),NULLIF(generated_content,'')) AS content
        FROM brain_nodes WHERE user_id=$1 AND status='active' AND type<>'task'
-       ORDER BY updated_at DESC LIMIT 10`,
+       ORDER BY updated_at DESC LIMIT 6`,
       [userId],
     );
     return {

@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import {
   AI_PROMPT_VERSION,
   AI_SCHEMA_VERSION,
+  DEFAULT_DEEPSEEK_MAX_OUTPUT_TOKENS,
   aiDecisionSchema,
   serializeAiContext,
   type AiContext,
@@ -165,6 +166,9 @@ REGRAS OBRIGATÓRIAS:
 - Crie lembretes somente com horário determinável, usando timezone e current_datetime para datas relativas.
 - Instruções explícitas podem virar learning com explicitInstruction=true. Preferências inferidas devem ser low risk e nunca ganham autoridade destrutiva.
 - Não reduza a conversa a tarefas: fatos úteis, decisões, observações, riscos, mudanças de status e contexto que ajudem o usuário no futuro devem virar memories com nodeType note ou decision, mesmo sem tarefa. Use tags descritivas como observacao, fato, status, risco ou preferencia. Conversa social sem valor futuro fica em memories=[].
+- Cada nota ou decisão deve ser atômica, factual e concisa (uma a três frases), sem copiar a conversa. Prefira uma observação por assunto a uma nota genérica que mistura temas.
+- Se uma observação ou decisão mencionar claramente uma pessoa, projeto, grupo ou entidade, inclua também a entidade durável correspondente e uma relation explícita para ela. Nunca crie entidade ou relation por mera suposição; a ligação deve ter evidência nas mensagens atuais.
+- Use relations para conectar conhecimento, não para decorar o grafo: no máximo as relações claramente sustentadas pela evidência.
 - Uma tarefa só é criada quando há uma responsabilidade ou ação concreta do dono. Nunca use uma falha de análise como motivo para criar tarefa.
 - Use active_learnings apenas quando o escopo combinar com esta conversa, pessoa ou projeto.
 - conversation_groups contém somente os grupos permitidos para esta conversa. Só retorne conversationClassification quando classification_state.eligible=true, houver evidência suficiente e groupId repetir exatamente um ID permitido.
@@ -274,7 +278,7 @@ export class DeepSeekDecisionClient {
 
   constructor(config: DeepSeekClientConfig) {
     this.model = config.model ?? DEEPSEEK_DEFAULT_MODEL;
-    this.maxOutputTokens = config.maxOutputTokens ?? 8_192;
+    this.maxOutputTokens = config.maxOutputTokens ?? DEFAULT_DEEPSEEK_MAX_OUTPUT_TOKENS;
     this.client = new OpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseURL ?? DEEPSEEK_OFFICIAL_BASE_URL,

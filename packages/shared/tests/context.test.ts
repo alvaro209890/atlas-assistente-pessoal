@@ -76,4 +76,31 @@ describe("buildAiContext", () => {
     expect(serialized.conversation_groups).toEqual([{ id: "group-work", name: "Trabalho", description: "Assuntos profissionais" }]);
     expect(serialized.classification_state).toMatchObject({ eligible: true, messageCount: 8 });
   });
+
+  it("caps the serialized context while preserving the newest evidence", () => {
+    const context = buildAiContext({
+      now: new Date("2026-07-14T15:00:00Z"),
+      chatJid: "contact@s.whatsapp.net",
+      maxRecentMessages: 20,
+      maxContextChars: 6_000,
+      previousSummary: "s".repeat(5_000),
+      messages: Array.from({ length: 20 }, (_, index) => message(
+        String(index).padStart(2, "0"),
+        false,
+        `mensagem-${index} ${"x".repeat(1_000)}`,
+      )),
+      memories: Array.from({ length: 8 }, (_, index) => ({
+        nodeType: "note" as const,
+        title: `Nota ${index}`,
+        content: "m".repeat(1_000),
+        aliases: [],
+        tags: [],
+      })),
+    });
+    const serialized = serializeAiContext(context);
+    expect(context.messages.at(-1)?.id).toBe("19");
+    expect(context.messages.every((item) => item.text.length <= 1_200)).toBe(true);
+    expect(context.previousSummary?.length).toBeLessThanOrEqual(1_200);
+    expect(serialized.length).toBeLessThan(10_000);
+  });
 });

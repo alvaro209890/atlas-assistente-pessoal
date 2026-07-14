@@ -10,6 +10,7 @@ import type {
   KnownMemory,
   NormalizedMessage,
 } from "./schemas.js";
+import { DEFAULT_AI_CONTEXT_MAX_CHARS, DEFAULT_AI_CONTEXT_MAX_MESSAGES } from "./constants.js";
 
 export interface BuildAiContextInput {
   now: Date;
@@ -29,6 +30,7 @@ export interface BuildAiContextInput {
   allowedListKeys?: string[];
   allowedTrelloMemberIds?: string[];
   maxRecentMessages?: number;
+  maxContextChars?: number;
   maxMemories?: number;
   maxCorrections?: number;
   maxActiveLearnings?: number;
@@ -45,10 +47,54 @@ const DEFAULT_PREFERENCES: AiPreferences = {
   processOwnMessagesWithPrefix: "trello:",
 };
 
+function clipText(value: string, limit: number): string {
+  if (value.length <= limit) return value;
+  if (limit < 80) return `${value.slice(0, Math.max(0, limit - 1))}…`;
+  const head = Math.floor((limit - 1) * 0.7);
+  return `${value.slice(0, head)}…${value.slice(-(limit - head - 1))}`;
+}
+
+function fitMessages(messages: readonly NormalizedMessage[], characterBudget: number): NormalizedMessage[] {
+  const selected: NormalizedMessage[] = [];
+  let used = 0;
+  for (const message of [...messages].reverse()) {
+    const overhead = 180;
+    const remaining = characterBudget - used - overhead;
+    if (remaining < 80 && selected.length > 0) break;
+    const text = clipText(message.text, Math.min(1_200, Math.max(80, remaining)));
+    selected.push({ ...message, text });
+    used += overhead + text.length;
+  }
+  return selected.reverse();
+}
+
+function fitTextItems<T>(
+  items: readonly T[],
+  characterBudget: number,
+  textOf: (item: T) => string,
+  replaceText: (item: T, text: string) => T,
+): T[] {
+  const result: T[] = [];
+  let used = 0;
+  for (const item of items) {
+    const remaining = characterBudget - used;
+    if (remaining < 80 && result.length > 0) break;
+    const text = clipText(textOf(item), Math.min(900, Math.max(80, remaining)));
+    result.push(replaceText(item, text));
+    used += text.length + 100;
+  }
+  return result;
+}
+
+function fitMetadata(metadata: Record<string, unknown>): Record<string, unknown> {
+  return JSON.stringify(metadata).length <= 500 ? metadata : { truncated: true };
+}
+
 export function buildAiContext(input: BuildAiContextInput): AiContext {
   // O worker pode montar lotes de até 30 mensagens. Nunca descartamos a
   // primeira metade do lote antes de a IA ter oportunidade de analisá-la.
-  const maxRecentMessages = Math.min(input.maxRecentMessages ?? 30, 30);
+  const maxRecentMessages = Math.min(input.maxRecentMessages ?? DEFAULT_AI_CONTEXT_MAX_MESSAGES, 30);
+  const maxContextChars = Math.max(6_000, Math.min(input.maxContextChars ?? DEFAULT_AI_CONTEXT_MAX_CHARS, 40_000));
   const maxMemories = Math.min(input.maxMemories ?? 8, 10);
   const maxCorrections = Math.min(input.maxCorrections ?? 8, 12);
   const maxActiveLearnings = Math.min(input.maxActiveLearnings ?? 6, 6);
@@ -69,25 +115,44 @@ export function buildAiContext(input: BuildAiContextInput): AiContext {
   const sortedMessages = [...eligibleMessages]
     .sort((left, right) => left.sentAt.localeCompare(right.sentAt))
     .slice(-maxRecentMessages);
+  const messages = fitMessages(sortedMessages, Math.floor(maxContextChars * 0.56));
+  const memories = fitTextItems(
+    [...(input.memories ?? [])].slice(0, maxMemories),
+    Math.floor(maxContextChars * 0.24),
+    (memory) => memory.content,
+    (memory, content) => ({ ...memory, content }),
+  );
+  const corrections = fitTextItems(
+    [...(input.corrections ?? [])].slice(0, maxCorrections),
+    Math.floor(maxContextChars * 0.1),
+    (correction) => correction.comment,
+    (correction, comment) => ({ ...correction, comment, metadata: fitMetadata(correction.metadata) }),
+  );
 
   return {
     now: input.now.toISOString(),
     chatJid: input.chatJid,
     chatName: input.chatName ?? null,
-    previousSummary: input.previousSummary ?? null,
+    previousSummary: input.previousSummary ? clipText(input.previousSummary, 1_200) : null,
     preferences,
-    messages: sortedMessages,
+    messages,
     isGroupChat: input.isGroupChat ?? input.chatJid.endsWith("@g.us"),
     ownerIdentity: {
       jids: [...new Set(input.ownerIdentity?.jids ?? [])],
       names: [...new Set((input.ownerIdentity?.names ?? []).map((name) => name.trim()).filter(Boolean))],
     },
-    memories: [...(input.memories ?? [])].slice(0, maxMemories),
-    corrections: [...(input.corrections ?? [])].slice(0, maxCorrections),
-    activeLearnings: [...(input.activeLearnings ?? [])].slice(0, maxActiveLearnings),
-    cardCandidates: [...(input.cardCandidates ?? [])].slice(0, maxCardCandidates),
+    memories,
+    corrections,
+    activeLearnings: [...(input.activeLearnings ?? [])].slice(0, maxActiveLearnings).map((learning) => ({
+      ...learning, statement: clipText(learning.statement, 500),
+    })),
+    cardCandidates: [...(input.cardCandidates ?? [])].slice(0, maxCardCandidates).map((card) => ({
+      ...card, description: clipText(card.description, 600),
+    })),
     commitmentCandidates: [...(input.commitmentCandidates ?? [])].slice(0, 12),
-    conversationGroups: [...(input.conversationGroups ?? [])].slice(0, 30),
+    conversationGroups: (input.conversationGroups ?? []).slice(0, 30).map((group) => ({
+      ...group, description: clipText(group.description, 240),
+    })),
     conversationClassification: {
       eligible: input.conversationClassification?.eligible ?? false,
       messageCount: input.conversationClassification?.messageCount ?? 0,

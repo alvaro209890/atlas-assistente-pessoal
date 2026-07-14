@@ -196,6 +196,11 @@ export async function registerHandlers(dependencies: HandlerDependencies): Promi
           payload.userId,
           payload.chatJid,
           payload.messages,
+          {
+            idleMinutes: config.CONVERSATION_CONTEXT_IDLE_MINUTES,
+            maxRecentMessages: config.AI_CONTEXT_MAX_MESSAGES,
+            maxContextChars: config.AI_CONTEXT_MAX_CHARS,
+          },
         );
         const run = await repository.beginAiRun(
           payload.userId,

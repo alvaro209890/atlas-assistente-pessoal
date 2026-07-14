@@ -20,6 +20,34 @@ Quando uma tarefa compartilha evidência com uma nota, o worker cria a edge
 idempotente `context_for`. Em caso de título ambíguo, uma relação sugerida pela
 IA é ignorada para evitar um vínculo incorreto.
 
+Notas e decisões que compartilham a mesma evidência de uma pessoa, projeto,
+grupo ou entidade recebem também a edge factual `about`. Isso dá conectividade
+ao grafo sem inventar relações: a IA ainda pode sugerir relações adicionais,
+mas apenas quando existirem título e tipo não ambíguos.
+
+Na recuperação de contexto, o Atlas seleciona até cinco nós semanticamente
+relacionados ao lote atual e até três vizinhos conectados por edges. Assim uma
+nota útil ligada a um projeto ou pessoa pode voltar ao contexto sem carregar o
+grafo inteiro.
+
+## Janela de contexto e custo
+
+Uma conversa do WhatsApp é reiniciada depois de **15 minutos** sem mensagens
+(`CONVERSATION_CONTEXT_IDLE_MINUTES`). A nova conversa não herda o resumo
+operacional anterior; fatos duráveis continuam disponíveis pelo grafo de
+memória, recuperados pelo conteúdo do lote atual.
+
+Antes da chamada à IA, o worker aplica dois tetos configuráveis:
+
+- `AI_CONTEXT_MAX_MESSAGES=20`: máximo de mensagens recentes fornecidas.
+- `AI_CONTEXT_MAX_CHARS=18000`: orçamento total aproximado para mensagens,
+  memórias, correções, cartões e aprendizados. Textos longos preservam começo
+  e fim, em vez de consumir o orçamento inteiro.
+
+O modelo recebe no máximo `DEEPSEEK_MAX_OUTPUT_TOKENS=4096` tokens de saída.
+Esses limites são independentes dos registros completos, que permanecem no
+banco e nas fontes do grafo para auditoria.
+
 ## Backfill do usuário
 
 Use primeiro um replay em modo seco para produzir relatório sem escrita ou

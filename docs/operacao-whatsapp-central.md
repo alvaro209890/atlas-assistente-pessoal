@@ -7,6 +7,11 @@ O Atlas usa duas conexões distintas:
 
 O worker mantém a sessão central com a chave interna `mother`. Mensagens diretas são associadas ao usuário pelo número de telefone normalizado, persistidas em `platform_whatsapp_messages`, respondidas pelo provedor de IA e enviadas por `notification_outbox`.
 
+O histórico conversacional direto é uma janela de 15 minutos por padrão. Se o
+usuário ficar inativo por esse período, a próxima mensagem abre um novo
+contexto; memórias e tarefas relevantes continuam acessíveis, sem reaproveitar
+conversa antiga como se ainda estivesse em andamento.
+
 ## Verificação rápida
 
 ```bash
