@@ -157,7 +157,11 @@ async function main(): Promise<void> {
         return;
       }
       if (event.type === "contacts") return;
-      if (event.type === "conversations" || event.message.fromMe) return;
+      if (event.type === "conversations") return;
+      // Respostas geradas pelo Atlas chegam de volta como `fromMe`; ignorá-las
+      // impede uma conversa em loop.  Mensagens recebidas do usuário seguem
+      // mesmo quando o WhatsApp as apresenta com um JID alternativo (LID).
+      if (event.message.fromMe) return;
       if (event.message.chatJid.endsWith("@g.us")) return;
       const userId = await repository.findUserByWhatsappJid(event.message.senderJid);
       if (!userId) {

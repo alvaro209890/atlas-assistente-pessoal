@@ -9,6 +9,7 @@ import {
   mapWhatsAppContactNames,
   mapContactCatalog,
   normalizeBrazilianPhone,
+  preferPhoneJid,
   shouldProcessWhatsAppChat,
   type BaileysAuthRepository,
 } from "../src/index.js";
@@ -76,6 +77,15 @@ describe("WhatsApp integration", () => {
     expect(shouldProcessWhatsAppChat("5511999@s.whatsapp.net", "5511999:12@s.whatsapp.net", false)).toBe(true);
     expect(shouldProcessWhatsAppChat("group@g.us", "5511999@s.whatsapp.net", false)).toBe(false);
     expect(shouldProcessWhatsAppChat("selected@g.us", "5511999@s.whatsapp.net", true)).toBe(true);
+  });
+
+  it("uses Baileys' phone-number alternate JID for direct chats", () => {
+    expect(preferPhoneJid("216737052123240@lid", "556684396232@s.whatsapp.net")).toBe(
+      "556684396232@s.whatsapp.net",
+    );
+    expect(preferPhoneJid("556684396232:12@s.whatsapp.net", "216737052123240@lid")).toBe(
+      "556684396232@s.whatsapp.net",
+    );
   });
 
   it("only marks group messages as directed when the owner is mentioned or quoted", () => {

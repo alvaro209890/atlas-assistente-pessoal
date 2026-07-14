@@ -220,6 +220,19 @@ export function shouldProcessWhatsAppChat(
   return selected || (selfJid !== null && jidNormalizedUser(chatJid) === jidNormalizedUser(selfJid));
 }
 
+/**
+ * Baileys can expose a direct chat under WhatsApp's private LID while also
+ * supplying the phone-number JID in `remoteJidAlt`/`participantAlt`.  Atlas
+ * identifies accounts by phone JID, so prefer it whenever it is available.
+ * The fallback preserves compatibility with older Baileys payloads.
+ */
+export function preferPhoneJid(...candidates: Array<string | null | undefined>): string | null {
+  const normalized = candidates
+    .filter((jid): jid is string => typeof jid === "string" && jid.length > 0)
+    .map((jid) => jidNormalizedUser(jid));
+  return normalized.find((jid) => jid.endsWith("@s.whatsapp.net")) ?? normalized[0] ?? null;
+}
+
 function mapConversationCatalog(items: readonly unknown[]): WhatsAppConversationCatalogEntry[] {
   const mapped: WhatsAppConversationCatalogEntry[] = [];
   for (const raw of items) {
@@ -458,7 +471,11 @@ export class BaileysSessionManager {
     socket.ev.on("messages.upsert", ({ messages }) => {
       void (async () => {
         for (const item of messages) {
-          const chatJid = item.key.remoteJid ? jidNormalizedUser(item.key.remoteJid) : null;
+          const keyWithAlternates = item.key as typeof item.key & {
+            remoteJidAlt?: string | null;
+            participantAlt?: string | null;
+          };
+          const chatJid = preferPhoneJid(item.key.remoteJid, keyWithAlternates.remoteJidAlt);
           const messageId = item.key.id;
           if (!chatJid || !messageId) continue;
           const selfJid = socket.user?.id ? jidNormalizedUser(socket.user.id) : null;
@@ -467,7 +484,11 @@ export class BaileysSessionManager {
           if (!shouldProcessWhatsAppChat(chatJid, selfJid, selected)) continue;
           const text = extractTextMessageContent(item.message);
           if (!text) continue;
-          const senderJid = jidNormalizedUser(item.key.participant ?? chatJid);
+          const senderJid = preferPhoneJid(
+            item.key.participant,
+            keyWithAlternates.participantAlt,
+            chatJid,
+          );
           if (!senderJid) continue;
           const isGroup = chatJid.endsWith("@g.us");
           const contextInfo = extractMessageContextInfo(item.message);
