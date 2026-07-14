@@ -90,29 +90,35 @@ async function main(): Promise<void> {
       });
       if (message.fromMe && !message.text.toLocaleLowerCase("pt-BR").startsWith("trello:")) {
         const selfChat = await repository.isSelfChat(message.userId, message.chatJid);
-        const command = selfChat ? parseAtlasSelfCommand(message.text) : null;
-        if (!command) return;
-        if (await repository.persistMessage(message)) {
-          const handling = await repository.handleSelfCommand(message.userId, command, message.id);
-          if (handling.task) {
-            await boss.send(QUEUES.trello, {
-              userId: message.userId,
-              batchKey: `self-command:${message.id}`,
-              task: handling.task.task,
-              allowedCandidateCardIds: handling.task.allowedCandidateCardIds,
-              allowedMemberIds: handling.task.allowedMemberIds,
-              attempt: 0,
-            } satisfies TrelloTaskJob);
+        if (selfChat) {
+          const command = parseAtlasSelfCommand(message.text);
+          if (!command) return;
+          if (await repository.persistMessage(message)) {
+            const handling = await repository.handleSelfCommand(message.userId, command, message.id);
+            if (handling.task) {
+              await boss.send(QUEUES.trello, {
+                userId: message.userId,
+                batchKey: `self-command:${message.id}`,
+                task: handling.task.task,
+                allowedCandidateCardIds: handling.task.allowedCandidateCardIds,
+                allowedMemberIds: handling.task.allowedMemberIds,
+                attempt: 0,
+              } satisfies TrelloTaskJob);
+            }
+            if (handling.notification && await repository.shouldNotifySelf(message.userId)) {
+              const outboxId = await repository.enqueueNotification(
+                { userId: message.userId, ...handling.notification },
+                `self-command:${message.id}:reply`,
+              );
+              await boss.send(QUEUES.notification, { outboxId, attempt: 0 } satisfies NotificationJob);
+            }
           }
-          if (handling.notification && await repository.shouldNotifySelf(message.userId)) {
-            const outboxId = await repository.enqueueNotification(
-              { userId: message.userId, ...handling.notification },
-              `self-command:${message.id}:reply`,
-            );
-            await boss.send(QUEUES.notification, { outboxId, attempt: 0 } satisfies NotificationJob);
-          }
+          return;
         }
-        return;
+        // fromMe numa conversa monitorada (não self): NÃO descarta. Persiste e
+        // manda ao batch para a IA ver os DOIS lados da conversa — contexto real
+        // e compromissos que o próprio Álvaro assume ("te envio amanhã"). Cai no
+        // fluxo comum de ingestão abaixo.
       }
       if (await repository.persistMessage(message)) {
         if (await repository.isAutomationEnabled(message.userId, "message_ingestion")) {

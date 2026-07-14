@@ -50,13 +50,13 @@ export function buildAiContext(input: BuildAiContextInput): AiContext {
     ...input.preferences,
   };
 
-  const eligibleMessages = input.messages.filter((message) => {
-    if (!message.fromMe) return true;
-    if (input.isSelfChat === true) return true;
-    return message.text
-      .toLocaleLowerCase(preferences.language)
-      .startsWith(preferences.processOwnMessagesWithPrefix.toLocaleLowerCase(preferences.language));
-  });
+  // Incluímos SEMPRE as mensagens do próprio dono como contexto da conversa: o
+  // campo `from_me` identifica quem falou, então a IA enxerga os dois lados do
+  // diálogo, entende o que já foi respondido e detecta compromissos que o
+  // próprio dono assume ("te envio amanhã"). O prefixo
+  // `processOwnMessagesWithPrefix` deixa de filtrar o contexto (segue existindo
+  // apenas por compatibilidade de configuração).
+  const eligibleMessages = [...input.messages];
 
   const sortedMessages = [...eligibleMessages]
     .sort((left, right) => left.sentAt.localeCompare(right.sentAt))

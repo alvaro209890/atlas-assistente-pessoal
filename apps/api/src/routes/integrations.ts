@@ -209,7 +209,9 @@ export async function registerIntegrationRoutes(app: FastifyInstance, deps: Inte
       id: string; display_name: string; is_group: boolean; enabled: boolean; metadata: { lastMessageAt?: string };
     }>(
       `SELECT id,display_name,is_group,enabled,metadata FROM monitored_chats
-       WHERE user_id=$1 AND whatsapp_connection_id=$2 ORDER BY display_name`, [user.id, connectionId],
+       WHERE user_id=$1 AND whatsapp_connection_id=$2
+         AND (jid LIKE '%@g.us' OR jid LIKE '%@s.whatsapp.net')
+       ORDER BY (display_name <> '') DESC, is_group DESC, display_name`, [user.id, connectionId],
     );
     return result.rows.map((row) => ({
       id: row.id, name: row.display_name, kind: row.is_group ? 'group' : 'direct',

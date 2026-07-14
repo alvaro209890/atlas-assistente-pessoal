@@ -24,17 +24,18 @@ describe("buildAiContext", () => {
     expect(context.messages.map((item) => item.id)).toEqual(["02", "03"]);
   });
 
-  it("filters own messages unless they use the configured prefix", () => {
+  it("inclui as mensagens do próprio dono como contexto (ambos os lados do diálogo)", () => {
     const context = buildAiContext({
       now: new Date("2026-07-13T15:00:00Z"),
       chatJid: "chat",
       messages: [
-        message("01", true, "lembrete comum"),
+        message("01", true, "te envio o contrato amanhã"),
         message("02", true, "TRELLO: criar o card"),
         message("03", false, "pedido recebido"),
       ],
     });
-    expect(context.messages.map((item) => item.id)).toEqual(["02", "03"]);
+    expect(context.messages.map((item) => item.id)).toEqual(["01", "02", "03"]);
+    expect(context.messages.filter((item) => item.fromMe)).toHaveLength(2);
   });
 
   it("carries recent user corrections into the serialized prompt context", () => {

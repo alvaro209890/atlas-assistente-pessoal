@@ -4,6 +4,7 @@ import {
   createPersistentAuthenticationState,
   createQrDataUrl,
   extractTextMessageContent,
+  isMonitorableChatJid,
   mapWhatsAppContactNames,
   normalizeBrazilianPhone,
   shouldProcessWhatsAppChat,
@@ -62,6 +63,22 @@ describe("WhatsApp integration", () => {
     expect(shouldProcessWhatsAppChat("5511999@s.whatsapp.net", "5511999:12@s.whatsapp.net", false)).toBe(true);
     expect(shouldProcessWhatsAppChat("group@g.us", "5511999@s.whatsapp.net", false)).toBe(false);
     expect(shouldProcessWhatsAppChat("selected@g.us", "5511999@s.whatsapp.net", true)).toBe(true);
+  });
+
+  it("só considera grupos e chats diretos como monitoráveis (exclui @lid e afins)", () => {
+    expect(isMonitorableChatJid("120363000000000000@g.us")).toBe(true);
+    expect(isMonitorableChatJid("556684396232@s.whatsapp.net")).toBe(true);
+    expect(isMonitorableChatJid("216737052123240@lid")).toBe(false);
+    expect(isMonitorableChatJid("status@broadcast")).toBe(false);
+    expect(isMonitorableChatJid("123@newsletter")).toBe(false);
+  });
+
+  it("descarta contatos @lid ao mapear nomes da agenda", () => {
+    const mapped = mapWhatsAppContactNames([
+      { id: "556684396232@s.whatsapp.net", name: "Cliente Direto" },
+      { id: "216737052123240@lid", name: "Participante de grupo" },
+    ]);
+    expect(mapped).toEqual([{ jid: "556684396232@s.whatsapp.net", name: "Cliente Direto" }]);
   });
 
   it("mapeia a agenda do QR em nomes de chat (nome salvo > pushName > verificado)", () => {

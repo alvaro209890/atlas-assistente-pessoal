@@ -293,6 +293,12 @@ export interface AiMessage {
   proposals?: ActionProposal[];
 }
 
+export interface ChatThreadSummary {
+  id: string;
+  title: string;
+  updatedAt: string;
+}
+
 export interface AppEvent {
   id: number;
   topic: string;

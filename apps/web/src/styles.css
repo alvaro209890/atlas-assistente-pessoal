@@ -360,6 +360,17 @@ kbd { border: 1px solid var(--line); background: #17141b; border-radius: 5px; co
   .sidebar { position: sticky; top: 0; max-height: var(--vh); }
 }
 
+.ai-panel__header-actions { display: inline-flex; align-items: center; gap: 4px; }
+
+/* Impede que colunas/containers flex "estourem" a altura da tela e cortem o
+   rodapé (perfil da sidebar, compositor do chat) em zoom/escala do SO > 100%.
+   min-height:0 deixa os filhos flex/grid encolherem e rolarem internamente. */
+.workspace-grid > * { min-height: 0; }
+.sidebar, .content-panel, .ai-panel { min-height: 0; }
+.sidebar nav { min-height: 0; }
+.ai-panel, .ai-panel__header, .ai-composer { flex: none; }
+.ai-thread { min-height: 0; }
+
 /* Conversas monitoradas (WhatsApp) */
 .chats-monitor { display: flex; flex-direction: column; gap: 14px; }
 .chats-monitor--loading { align-items: center; justify-content: center; min-height: 260px; flex-direction: row; gap: 9px; color: var(--muted); font-size: 12px; }

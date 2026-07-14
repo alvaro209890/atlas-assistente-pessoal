@@ -148,10 +148,20 @@ export function createQrDataUrl(qr: string): Promise<string> {
 }
 
 /**
+ * Uma conversa monitorável é sempre um GRUPO (`@g.us`) ou um chat DIRETO
+ * (`@s.whatsapp.net`). Identidades `@lid` (participantes de grupo / modo
+ * privacidade), `@newsletter`, `status@broadcast` e afins NÃO são conversas do
+ * dono do número e não devem virar itens monitoráveis.
+ */
+export function isMonitorableChatJid(jid: string): boolean {
+  return jid.endsWith("@g.us") || jid.endsWith("@s.whatsapp.net");
+}
+
+/**
  * Normaliza a agenda do Baileys (sync inicial do QR, contacts.upsert/update) em
  * pares {jid, name} prontos para nomear os chats. Prioriza o nome salvo pelo
  * dono do número, depois o pushName público e por fim o nome verificado
- * (contas comerciais); descarta entradas sem id ou sem nenhum nome.
+ * (contas comerciais); descarta entradas sem id, sem nome ou não-monitoráveis.
  */
 export function mapWhatsAppContactNames(
   rawContacts: readonly { id?: unknown; name?: unknown; notify?: unknown; verifiedName?: unknown }[],
@@ -166,7 +176,7 @@ export function mapWhatsAppContactNames(
         (typeof c.verifiedName === "string" && c.verifiedName.trim()) ||
         "",
     }))
-    .filter((c) => c.name);
+    .filter((c) => c.name && isMonitorableChatJid(c.jid));
 }
 
 export function shouldProcessWhatsAppChat(
@@ -188,6 +198,7 @@ function mapConversationCatalog(items: readonly unknown[]): WhatsAppConversation
     };
     if (typeof item.id !== "string" || !item.id) continue;
     const jid = jidNormalizedUser(item.id);
+    if (!isMonitorableChatJid(jid)) continue;
     const timestamp = item.conversationTimestamp;
     mapped.push({
       jid,

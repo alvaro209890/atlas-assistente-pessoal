@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowUp, Bot, Check, FileText, MessageCircle, PanelRightClose, Pencil, Repeat2, Sparkles, SquareKanban, X } from 'lucide-react';
+import { ArrowUp, Bot, Check, FileText, MessageCircle, PanelRightClose, Pencil, Plus, Repeat2, Sparkles, SquareKanban, X } from 'lucide-react';
 import type { AppApi } from '../api';
 import type { ActionProposal, AiMessage, AiSource, AssistantTask, NavId, ProposalAction } from '../types';
 import { Spinner } from './ui';
@@ -64,6 +64,30 @@ export function AIAssistant({ api, view, noteId, mobileOpen, tasks = [], onMobil
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [messages, sending]);
+
+  // Retoma a conversa mais recente ao abrir/recarregar a página, para não perder
+  // o histórico (persistido no servidor em brain_chat_threads/messages).
+  useEffect(() => {
+    let active = true;
+    void api.listChatThreads()
+      .then(async (threads) => {
+        if (!active || threads.length === 0) return;
+        const latest = threads[0]!;
+        const history = await api.getChatMessages(latest.id);
+        if (!active || history.length === 0) return;
+        setMessages(history);
+        setThreadId(latest.id);
+      })
+      .catch(() => { /* mantém a saudação inicial se não houver histórico */ });
+    return () => { active = false; };
+  }, [api]);
+
+  const startNewChat = () => {
+    setThreadId(null);
+    setMessages(initialMessages);
+    setError(null);
+    setDraft('');
+  };
 
   const send = async (event?: FormEvent) => {
     event?.preventDefault();
@@ -146,7 +170,10 @@ export function AIAssistant({ api, view, noteId, mobileOpen, tasks = [], onMobil
     <aside className={`ai-panel ${mobileOpen ? 'is-mobile-open' : ''}`} aria-label="Assistente Atlas">
       <header className="ai-panel__header">
         <div><span className="ai-avatar"><Sparkles size={17} /></span><span><strong>Assistente Atlas</strong><small><i /> Contexto ativo</small></span></div>
-        <button className="icon-button ai-mobile-close" type="button" onClick={onMobileClose} aria-label="Fechar assistente"><PanelRightClose size={18} /></button>
+        <div className="ai-panel__header-actions">
+          <button className="icon-button" type="button" onClick={startNewChat} title="Nova conversa" aria-label="Nova conversa"><Plus size={17} /></button>
+          <button className="icon-button ai-mobile-close" type="button" onClick={onMobileClose} aria-label="Fechar assistente"><PanelRightClose size={18} /></button>
+        </div>
       </header>
       <div className="ai-context-strip"><Bot size={14} /><span>Respondendo com base no seu segundo cérebro</span></div>
       <div className="ai-thread" aria-live="polite">

@@ -3,11 +3,14 @@ import type {
   ActionProposal,
   AssistantLearning,
   AssistantTask,
+  AiMessage,
   AiRequest,
   AiResponse,
+  AiSource,
   AppEvent,
   AuthInput,
   Chat,
+  ChatThreadSummary,
   Commitment,
   FeedbackAction,
   LearningAction,
@@ -77,6 +80,8 @@ export interface AppApi {
   createNote(): Promise<Note>;
   updateNote(id: string, input: { title: string; contentMarkdown: string }): Promise<Note>;
   askAi(input: AiRequest): Promise<AiResponse>;
+  listChatThreads(): Promise<ChatThreadSummary[]>;
+  getChatMessages(threadId: string): Promise<AiMessage[]>;
   toggleAutomation(id: string, enabled: boolean): Promise<{ id: string; enabled: boolean }>;
   createAutomation(input: { kind: 'briefing' | 'deadline' | 'overdue' | 'follow_up' | 'stale_task' | 'weekly_review'; time?: string }): Promise<WorkspaceData['automations'][number]>;
   sendFeedback(input: { itemId: string; action: FeedbackAction; context: 'inbox' | 'activity' }): Promise<{ accepted: boolean }>;
@@ -570,6 +575,27 @@ class RealApi implements AppApi {
     };
   }
 
+  async listChatThreads() {
+    const payload = await request<{ items: ChatThreadSummary[] } | ChatThreadSummary[]>('/brain/chat/threads');
+    return unwrapItems(payload);
+  }
+
+  async getChatMessages(threadId: string) {
+    type Stored = { id: string; role: string; content: string | null; citations?: unknown };
+    const payload = await request<{ items: Stored[] } | Stored[]>(`/brain/chat/threads/${encodeURIComponent(threadId)}/messages`);
+    return unwrapItems(payload)
+      .filter((message): message is Stored & { role: 'user' | 'assistant' } =>
+        (message.role === 'user' || message.role === 'assistant') && !!message.content?.trim())
+      .map((message) => ({
+        id: message.id,
+        role: message.role,
+        content: message.content as string,
+        ...(Array.isArray(message.citations) && message.citations.length
+          ? { sources: message.citations as AiSource[] }
+          : {}),
+      })) satisfies AiMessage[];
+  }
+
   toggleAutomation(id: string, enabled: boolean) {
     return request<{ id: string; enabled: boolean }>(`/automations/${encodeURIComponent(id)}`, {
       method: 'PATCH',
@@ -902,6 +928,16 @@ class PreviewApi implements AppApi {
       ],
       proposals: input.message.toLocaleLowerCase('pt-BR').includes('adiar') ? clone(this.workspace.proposals?.slice(0, 1) ?? []) : [],
     };
+  }
+
+  async listChatThreads() {
+    await pause(60);
+    return [] as ChatThreadSummary[];
+  }
+
+  async getChatMessages() {
+    await pause(60);
+    return [] as AiMessage[];
   }
 
   async toggleAutomation(id: string, enabled: boolean) {

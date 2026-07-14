@@ -20,7 +20,7 @@ describe('AIAssistant', () => {
       }],
     }));
     const onOpenNote = vi.fn();
-    const api = { askAi } as unknown as AppApi;
+    const api = { askAi, listChatThreads: async () => [], getChatMessages: async () => [] } as unknown as AppApi;
     const user = userEvent.setup();
     render(<AIAssistant api={api} view="today" noteId={null} mobileOpen={false} onMobileClose={() => undefined} onOpenNote={onOpenNote} />);
 
@@ -68,7 +68,7 @@ describe('AIAssistant', () => {
       status: input.action === 'confirm' ? 'confirmed' as const : 'edited' as const,
       evidence: [],
     }));
-    const api = { askAi, actOnProposal } as unknown as AppApi;
+    const api = { askAi, actOnProposal, listChatThreads: async () => [], getChatMessages: async () => [] } as unknown as AppApi;
     const user = userEvent.setup();
     render(<AIAssistant api={api} view="today" noteId={null} mobileOpen={false} onMobileClose={() => undefined} onOpenNote={() => undefined} />);
 
@@ -123,7 +123,7 @@ describe('AIAssistant', () => {
       evidence: [],
       payload: input.patch,
     }));
-    const api = { askAi, actOnProposal } as unknown as AppApi;
+    const api = { askAi, actOnProposal, listChatThreads: async () => [], getChatMessages: async () => [] } as unknown as AppApi;
     const user = userEvent.setup();
     render(<AIAssistant api={api} view="today" noteId={null} mobileOpen={false} onMobileClose={() => undefined} onOpenNote={() => undefined} />);
 
