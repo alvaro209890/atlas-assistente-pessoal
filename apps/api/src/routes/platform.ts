@@ -294,11 +294,12 @@ export async function registerPlatformRoutes(app: FastifyInstance, deps: Platfor
     const result = await database.query<SettingsRow>(
       `UPDATE user_settings SET timezone=COALESCE($2,timezone),locale=COALESCE($3,locale),
          ai_model=COALESCE($4,ai_model),reasoning_effort='high',
-         reminder_times=COALESCE($5,reminder_times),feature_flags=feature_flags || COALESCE($6,'{}'::jsonb)
+         reminder_times=COALESCE($5::jsonb,reminder_times),feature_flags=feature_flags || COALESCE($6::jsonb,'{}'::jsonb)
        WHERE user_id=$1
        RETURNING timezone,locale,ai_provider,ai_model,reasoning_effort,reminder_times,feature_flags,updated_at`,
       [user.id, input.timezone ?? null, input.locale ?? null, input.aiModel ?? null,
-        input.reminderTimes ?? null, input.featureFlags ?? null],
+        input.reminderTimes ? JSON.stringify(input.reminderTimes) : null,
+        input.featureFlags ? JSON.stringify(input.featureFlags) : null],
     );
     await events.publish(user.id, 'config.updated');
     const row = result.rows[0]!;
