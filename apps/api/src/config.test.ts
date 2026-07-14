@@ -8,7 +8,7 @@ describe('API configuration', () => {
     expect(config.webOrigin).toBe('http://localhost:5173');
     expect(config.deepseek.baseUrl).toBe('https://api.deepseek.com');
     expect(config.deepseek.model).toBe('deepseek-v4-flash');
-    expect(config.deepseek.reasoningEffort).toBe('high');
+    expect(config.deepseek.reasoningEffort).toBe('medium');
   });
 
   it('honors root session variable names and requires a production secret', () => {

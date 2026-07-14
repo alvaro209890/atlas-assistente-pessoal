@@ -110,7 +110,7 @@ export class DeepSeekProvider implements AiProvider {
         signal: controller.signal,
         body: JSON.stringify({
           model: this.options.model,
-          reasoning_effort: 'high',
+          reasoning_effort: 'medium',
           thinking: { type: 'enabled' },
           messages: [
             {

@@ -293,7 +293,7 @@ export async function registerPlatformRoutes(app: FastifyInstance, deps: Platfor
     }).refine((value) => Object.keys(value).length > 0), request.body);
     const result = await database.query<SettingsRow>(
       `UPDATE user_settings SET timezone=COALESCE($2,timezone),locale=COALESCE($3,locale),
-         ai_model=COALESCE($4,ai_model),reasoning_effort='high',
+         ai_model=COALESCE($4,ai_model),reasoning_effort='medium',
          reminder_times=COALESCE($5::jsonb,reminder_times),feature_flags=feature_flags || COALESCE($6::jsonb,'{}'::jsonb)
        WHERE user_id=$1
        RETURNING timezone,locale,ai_provider,ai_model,reasoning_effort,reminder_times,feature_flags,updated_at`,

@@ -168,7 +168,7 @@ async function askWithContext(
   const conversation = history.rows.reverse().slice(0, -1);
   const run = await database.query<{ id: string }>(
     `INSERT INTO ai_runs (user_id, purpose, provider, model, reasoning_effort, status, thread_id, input, started_at)
-     VALUES ($1,'brain_chat','deepseek','deepseek-v4-flash','high','running',$2,$3,now()) RETURNING id`,
+     VALUES ($1,'brain_chat','deepseek','deepseek-v4-flash','medium','running',$2,$3,now()) RETURNING id`,
     [user.id, threadId, { message: input.message, sourceIds: sources.map((source) => source.id), context: input.context }],
   );
   const runId = run.rows[0]!.id;

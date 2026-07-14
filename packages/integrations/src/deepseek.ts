@@ -200,7 +200,7 @@ export class DeepSeekDecisionClient {
       ],
       response_format: { type: "json_object" },
       thinking: { type: "enabled" },
-      reasoning_effort: "high",
+      reasoning_effort: "medium",
       max_tokens: this.maxOutputTokens,
       stream: false,
     } as const;

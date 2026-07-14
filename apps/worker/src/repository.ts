@@ -904,7 +904,7 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
       `INSERT INTO ai_runs
          (user_id, purpose, provider, model, reasoning_effort, status, prompt_version,
           idempotency_key, input, message_batch_id, started_at)
-       VALUES ($1, 'whatsapp_triage', 'deepseek', 'deepseek-v4-flash', 'high',
+       VALUES ($1, 'whatsapp_triage', 'deepseek', 'deepseek-v4-flash', 'medium',
          'running', $5, $2, $3, $4, now()) RETURNING id`,
       [userId, batchKey, JSON.stringify(context), batchId, AI_PROMPT_VERSION],
     );

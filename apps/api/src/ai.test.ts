@@ -7,11 +7,11 @@ describe('DeepSeek provider', () => {
     expect(invalidCitationNumbers('Sem referências.', 0)).toEqual([]);
   });
 
-  it('always requests the configured V4 Flash model with high reasoning and cited context', async () => {
+  it('always requests the configured V4 Flash model with medium reasoning and cited context', async () => {
     const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const payload = JSON.parse(String(init?.body)) as Record<string, unknown>;
       expect(payload).toMatchObject({
-        model: 'deepseek-v4-flash', reasoning_effort: 'high', thinking: { type: 'enabled' },
+        model: 'deepseek-v4-flash', reasoning_effort: 'medium', thinking: { type: 'enabled' },
       });
       expect(payload).not.toHaveProperty('temperature');
       expect(JSON.stringify(payload)).toContain('[fonte 1');

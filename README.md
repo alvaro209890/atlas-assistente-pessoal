@@ -19,7 +19,7 @@ O Atlas possui personalidade masculina, direta, humana e calma. Ele usa o nome p
 - Segundo Cérebro no PostgreSQL com notas manuais, conteúdo gerado, wikilinks, backlinks, fontes, revisões, grafo e chat.
 - Chat com respostas fundamentadas e propostas confirmáveis de ação.
 - Briefings às 08:00 e 18:00, configuráveis por conta.
-- DeepSeek V4 Flash com thinking habilitado e raciocínio alto.
+- DeepSeek V4 Flash com thinking habilitado e raciocínio médio.
 - Eventos em tempo real por SSE e execução assíncrona com `pg-boss`.
 
 Nenhuma mensagem sai pela sessão pessoal e nenhuma resposta é enviada aos contatos monitorados. Alertas e sugestões são enviados exclusivamente pelo WhatsApp central para o número da própria pessoa, identificado automaticamente quando ela lê o QR pessoal.
@@ -75,7 +75,7 @@ O serviço `migrate` aplica as migrações antes de iniciar a API e o worker.
 - `AI_CONFIDENCE_THRESHOLD`: padrão `0.70`.
 - `RUN_LIVE_AI_TESTS`: habilita testes reais e cobrados somente quando definido como `1`.
 
-O modelo é fixado em `deepseek-v4-flash`, com `thinking.type=enabled`, `reasoning_effort=high` e sem `temperature`.
+O modelo é fixado em `deepseek-v4-flash`, com `thinking.type=enabled`, `reasoning_effort=medium` e sem `temperature`.
 
 ## Validação
 

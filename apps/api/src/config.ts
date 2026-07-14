@@ -40,7 +40,7 @@ export interface ApiConfig {
     apiKey?: string;
     baseUrl: string;
     model: string;
-    reasoningEffort: 'high';
+    reasoningEffort: 'medium';
     timeoutMs: number;
   };
   trello: {
@@ -80,7 +80,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       ...(parsed.DEEPSEEK_API_KEY ? { apiKey: parsed.DEEPSEEK_API_KEY } : {}),
       baseUrl: parsed.DEEPSEEK_BASE_URL.replace(/\/$/, ''),
       model: parsed.DEEPSEEK_MODEL,
-      reasoningEffort: 'high',
+      reasoningEffort: 'medium',
       timeoutMs: parsed.DEEPSEEK_TIMEOUT_MS,
     },
     trello: {
