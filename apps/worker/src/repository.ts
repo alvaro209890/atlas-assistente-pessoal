@@ -1,16 +1,18 @@
 import { randomUUID } from "node:crypto";
 
 import type { Database } from "@atlas/database";
-import type {
-  BaileysAuthRepository,
-  Notification,
-  SelectedChatRepository,
-  TrelloCard,
-  TrelloExecutionResult,
-  TrelloList,
-  TrelloListRoleMap,
-  TrelloMember,
-  WhatsAppConversationCatalogEntry,
+import {
+  normalizeBrazilianPhone,
+  type BaileysAuthRepository,
+  type Notification,
+  type SelectedChatRepository,
+  type TrelloCard,
+  type TrelloExecutionResult,
+  type TrelloList,
+  type TrelloListRoleMap,
+  type TrelloMember,
+  type WhatsAppConversationCatalogEntry,
+  type WhatsAppRecipientResolver,
 } from "@atlas/integrations";
 import {
   AI_PROMPT_VERSION,
@@ -162,7 +164,7 @@ export type GeneratedSummaryKind =
   | "weekly_review"
   | "consolidated_summary";
 
-export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepository {
+export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepository, WhatsAppRecipientResolver {
   constructor(readonly database: Database) {}
 
   async publishEvent(
@@ -291,12 +293,14 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
       return;
     }
     if (state.status === "connected") {
+      const phone = normalizeBrazilianPhone(state.selfJid);
+      if (!phone) throw new Error(`Could not identify a Brazilian phone number from ${state.selfJid}`);
       await this.database.userTransaction(userId, async (client) => {
         await client.query(
-          `UPDATE whatsapp_connections SET status = 'connected', jid = $2,
+          `UPDATE whatsapp_connections SET status = 'connected', jid = $2, self_jid = $2, phone_number = $3,
              pairing_qr = NULL, pairing_expires_at = NULL, last_connected_at = now(), last_error = NULL
            WHERE user_id = $1 AND status <> 'logged_out'`,
-          [userId, state.selfJid],
+          [userId, phone.jid, phone.formatted],
         );
         if (state.displayName?.trim()) {
           await client.query(
@@ -1023,6 +1027,152 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
     if (changed > 0) {
       await this.publishEvent(userId, "brain.memory.updated", { count: changed }, "ai");
     }
+  }
+
+  async recipientJid(userId: string): Promise<string> {
+    const result = await this.database.query<{ self_jid: string }>(
+      `SELECT self_jid FROM whatsapp_connections
+       WHERE user_id=$1 AND self_jid IS NOT NULL
+       ORDER BY (status='connected') DESC,updated_at DESC LIMIT 1`,
+      [userId],
+    );
+    const phone = result.rows[0] ? normalizeBrazilianPhone(result.rows[0].self_jid) : null;
+    if (!phone) throw new Error(`No Brazilian WhatsApp recipient registered for user ${userId}`);
+    return phone.jid;
+  }
+
+  async findUserByWhatsappJid(jid: string): Promise<string | null> {
+    const phone = normalizeBrazilianPhone(jid);
+    if (!phone) return null;
+    const result = await this.database.query<{ user_id: string }>(
+      `SELECT user_id FROM whatsapp_connections
+       WHERE self_jid=$1
+       ORDER BY (status='connected') DESC,updated_at DESC LIMIT 1`,
+      [phone.jid],
+    );
+    return result.rows[0]?.user_id ?? null;
+  }
+
+  async enqueueWelcomeIfNeeded(userId: string): Promise<number> {
+    const result = await this.database.query<{ preferred_name: string; welcome_message: string }>(
+      `SELECT u.preferred_name,p.welcome_message FROM users u
+       CROSS JOIN platform_whatsapp_connection p
+       WHERE u.id=$1 AND p.singleton_key='mother'`,
+      [userId],
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error(`Could not build welcome message for user ${userId}`);
+    return this.enqueueNotification({
+      userId,
+      kind: "welcome",
+      title: "Bem-vindo ao Atlas",
+      body: row.welcome_message.replaceAll("{nome}", row.preferred_name),
+    }, "platform-mother:welcome:v1");
+  }
+
+  async persistMotherMessage(message: NormalizedMessage): Promise<boolean> {
+    const connectionId = await this.getConnectionId(message.userId);
+    const result = await this.database.transaction(async (client) => {
+      const audit = await client.query<IdRow>(
+        `INSERT INTO platform_whatsapp_messages
+           (user_id,external_message_id,chat_jid,sender_jid,direction,body,sent_at)
+         VALUES ($1,$2,$3,$4,'inbound',$5,$6)
+         ON CONFLICT (external_message_id) DO NOTHING RETURNING id`,
+        [message.userId, message.id, message.chatJid, message.senderJid, message.text, message.sentAt],
+      );
+      if (audit.rowCount !== 1) return false;
+      await client.query(
+        `INSERT INTO whatsapp_messages
+           (user_id,whatsapp_connection_id,monitored_chat_id,external_message_id,
+            chat_jid,sender_jid,direction,from_me,message_type,body,sent_at)
+         SELECT $1,$2,NULL,$3,$4,$5,'inbound',false,'text',$6,$7
+         FROM whatsapp_connections
+         WHERE id=$2 AND user_id=$1 AND self_jid=$4
+         ON CONFLICT (user_id,whatsapp_connection_id,external_message_id) DO NOTHING`,
+        [message.userId, connectionId, message.id, message.chatJid, message.senderJid, message.text, message.sentAt],
+      );
+      return true;
+    });
+    return result;
+  }
+
+  platformAuthRepository(): BaileysAuthRepository {
+    return {
+      get: async (_sessionKey, category, key) => {
+        const result = await this.database.query<{ record_value: string }>(
+          `SELECT record_value FROM platform_whatsapp_auth_records
+           WHERE singleton_key='mother' AND category=$1 AND record_key=$2`,
+          [category, key],
+        );
+        return result.rows[0]?.record_value ?? null;
+      },
+      set: async (_sessionKey, category, key, value) => {
+        if (value === null) {
+          await this.database.query(
+            `DELETE FROM platform_whatsapp_auth_records
+             WHERE singleton_key='mother' AND category=$1 AND record_key=$2`,
+            [category, key],
+          );
+          return;
+        }
+        await this.database.query(
+          `INSERT INTO platform_whatsapp_auth_records (singleton_key,category,record_key,record_value)
+           VALUES ('mother',$1,$2,$3)
+           ON CONFLICT (singleton_key,category,record_key)
+           DO UPDATE SET record_value=EXCLUDED.record_value,updated_at=now()`,
+          [category, key, value],
+        );
+      },
+      clearUser: async () => {
+        await this.database.query("DELETE FROM platform_whatsapp_auth_records WHERE singleton_key='mother'");
+      },
+    };
+  }
+
+  async platformWhatsappStatus(): Promise<ActiveWhatsappConnection["status"]> {
+    const result = await this.database.query<{ status: ActiveWhatsappConnection["status"] }>(
+      "SELECT status FROM platform_whatsapp_connection WHERE singleton_key='mother'",
+    );
+    return result.rows[0]?.status ?? "disconnected";
+  }
+
+  async updatePlatformWhatsappState(state:
+    | { status: "pairing"; qrDataUrl: string }
+    | { status: "connected"; selfJid: string }
+    | { status: "reconnecting" | "disconnected" | "logged_out" }
+    | { status: "error"; error: string }): Promise<void> {
+    if (state.status === "pairing") {
+      await this.database.query(
+        `UPDATE platform_whatsapp_connection SET status='pairing',pairing_qr=$1,
+           pairing_expires_at=now()+interval '2 minutes',last_error=NULL
+         WHERE singleton_key='mother'`,
+        [state.qrDataUrl],
+      );
+      return;
+    }
+    if (state.status === "connected") {
+      const phone = normalizeBrazilianPhone(state.selfJid);
+      if (!phone) throw new Error(`Could not identify the central Brazilian number from ${state.selfJid}`);
+      await this.database.transaction(async (client) => {
+        await client.query(
+          `UPDATE platform_whatsapp_connection SET status='connected',phone_number=$1,self_jid=$2,
+             pairing_qr=NULL,pairing_expires_at=NULL,last_connected_at=now(),last_error=NULL
+           WHERE singleton_key='mother'`,
+          [phone.formatted, phone.jid],
+        );
+        await client.query(
+          `UPDATE notification_outbox SET status='pending',attempt_count=0,last_error=NULL,scheduled_at=now()
+           WHERE channel='whatsapp' AND status='failed' AND sent_at IS NULL`,
+        );
+      });
+      return;
+    }
+    await this.database.query(
+      `UPDATE platform_whatsapp_connection SET status=$1,
+         pairing_qr=CASE WHEN $1 IN ('logged_out','disconnected') THEN NULL ELSE pairing_qr END,
+         last_error=$2 WHERE singleton_key='mother'`,
+      [state.status, state.status === "error" ? state.error : null],
+    );
   }
 
   async isSelfChat(userId: string, chatJid: string): Promise<boolean> {
@@ -2483,17 +2633,17 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
   }
 
   async enqueueNotification(notification: Notification, dedupeKey: string): Promise<number> {
-    const connectionId = await this.getConnectionId(notification.userId);
+    const recipientJid = await this.recipientJid(notification.userId);
     const result = await this.database.query<{ id: string }>(
       `INSERT INTO notification_outbox
-         (user_id, channel, whatsapp_connection_id, subject, body, payload, dedupe_key)
-       VALUES ($1, 'whatsapp', $2, $3, $4, $5, $6)
-       ON CONFLICT (user_id, channel, dedupe_key) WHERE dedupe_key IS NOT NULL
-       DO UPDATE SET subject = EXCLUDED.subject
-       RETURNING id`,
+         (user_id, channel, whatsapp_connection_id, recipient_jid, subject, body, payload, dedupe_key)
+        VALUES ($1, 'whatsapp', NULL, $2, $3, $4, $5, $6)
+        ON CONFLICT (user_id, channel, dedupe_key) WHERE dedupe_key IS NOT NULL
+        DO UPDATE SET subject = EXCLUDED.subject
+        RETURNING id`,
       [
         notification.userId,
-        connectionId,
+        recipientJid,
         notification.title,
         notification.body,
         JSON.stringify(notification),
@@ -2501,6 +2651,18 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
       ],
     );
     return Number(result.rows[0]!.id);
+  }
+
+  async listPendingMotherOutboxIds(limit = 100): Promise<number[]> {
+    const result = await this.database.query<{ id: string }>(
+      `SELECT no.id FROM notification_outbox no
+       JOIN platform_whatsapp_connection p ON p.singleton_key='mother' AND p.status='connected'
+       WHERE no.channel='whatsapp' AND no.status='pending' AND no.scheduled_at<=now()
+         AND no.recipient_jid IS NOT NULL AND no.attempt_count<no.max_attempts
+       ORDER BY no.priority,no.scheduled_at LIMIT $1`,
+      [limit],
+    );
+    return result.rows.map((row) => Number(row.id));
   }
 
   async getOutbox(id: number): Promise<OutboxRecord | null> {
@@ -2628,7 +2790,12 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
          SELECT ro.id
          FROM reminder_occurrences ro
          JOIN reminders r ON r.user_id=ro.user_id AND r.id=ro.reminder_id
-         JOIN whatsapp_connections wc ON wc.user_id=ro.user_id AND wc.status='connected'
+          JOIN LATERAL (
+            SELECT 1 FROM whatsapp_connections wc
+            WHERE wc.user_id=ro.user_id AND wc.self_jid IS NOT NULL
+            ORDER BY (wc.status='connected') DESC,wc.updated_at DESC LIMIT 1
+          ) recipient_whatsapp ON true
+          JOIN platform_whatsapp_connection pw ON pw.singleton_key='mother' AND pw.status='connected'
          JOIN user_settings us ON us.user_id=ro.user_id
          WHERE ro.status IN ('pending','failed','snoozed') AND ro.deliver_after<=now()
            AND r.status IN ('scheduled','snoozed')
@@ -2681,10 +2848,11 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
        JOIN automations a ON a.user_id = us.user_id
          AND a.kind = 'pending_reminder' AND a.enabled = true
        JOIN LATERAL (
-         SELECT 1 FROM whatsapp_connections wc
-         WHERE wc.user_id=us.user_id AND wc.status='connected' AND wc.self_jid IS NOT NULL
-         ORDER BY wc.updated_at DESC LIMIT 1
-       ) connected_whatsapp ON true
+          SELECT 1 FROM whatsapp_connections wc
+          WHERE wc.user_id=us.user_id AND wc.self_jid IS NOT NULL
+          ORDER BY (wc.status='connected') DESC,wc.updated_at DESC LIMIT 1
+        ) registered_whatsapp ON true
+        JOIN platform_whatsapp_connection pw ON pw.singleton_key='mother' AND pw.status='connected'
        CROSS JOIN LATERAL jsonb_array_elements_text(us.reminder_times) rt(value)
        WHERE COALESCE((us.feature_flags->>'notifySelf')::boolean, true) = true
          AND to_char(now() AT TIME ZONE us.timezone, 'HH24:MI') = rt.value`,

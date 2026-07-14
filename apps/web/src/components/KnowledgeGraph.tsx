@@ -96,7 +96,7 @@ export function KnowledgeGraph({ nodes, edges, onOpenNode }: KnowledgeGraphProps
       <header className="graph-toolbar">
         <label className="search-field graph-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Encontrar no grafo" /></label>
         <div className="graph-filters" role="group" aria-label="Filtrar conexões">
-          {([['all', 'Tudo'], ['note', 'Notas'], ['project', 'Projetos'], ['person', 'Pessoas'], ['topic', 'Temas']] as const).map(([value, label]) => <button type="button" key={value} className={kind === value ? 'is-active' : ''} onClick={() => setKind(value)}>{label}</button>)}
+          {([['all', 'Tudo'], ['note', 'Notas'], ['project', 'Projetos'], ['person', 'Pessoas'], ['topic', 'Temas']] as const).map(([value, label]) => <button type="button" key={value} aria-pressed={kind === value} className={kind === value ? 'is-active' : ''} onClick={() => setKind(value)}>{label}</button>)}
         </div>
         <div className="graph-filter-selects">
           <select value={source} onChange={(event) => setSource(event.target.value as typeof source)} aria-label="Filtrar grafo por fonte">

@@ -27,7 +27,7 @@ describe('OnboardingFlow live updates', () => {
     });
 
     const view = render(<OnboardingFlow api={api} onComplete={vi.fn()} />);
-    expect(await screen.findByText('Conecte seu WhatsApp principal')).toBeInTheDocument();
+    expect(await screen.findByText('Conecte seu WhatsApp para o Atlas ler')).toBeInTheDocument();
 
     act(() => eventListener?.({
       id: 7,
@@ -38,8 +38,8 @@ describe('OnboardingFlow live updates', () => {
     }));
 
     await waitFor(() => expect(api.getOnboarding).toHaveBeenCalledTimes(2), { timeout: 1_000 });
-    expect(await screen.findByText('WhatsApp conectado')).toBeInTheDocument();
-    expect(screen.getByText('+55 11 99999-0000')).toBeInTheDocument();
+    expect(await screen.findByText('WhatsApp pessoal conectado somente para leitura')).toBeInTheDocument();
+    expect(screen.getByText(/\+55 11 99999-0000 identificado automaticamente/)).toBeInTheDocument();
 
     view.unmount();
     expect(unsubscribe).toHaveBeenCalledOnce();
@@ -64,5 +64,29 @@ describe('OnboardingFlow live updates', () => {
     expect(await screen.findByText('Não foi possível conectar')).toBeInTheDocument();
     expect(screen.getByText('Sessão encerrada pelo WhatsApp.')).toBeInTheDocument();
     expect(screen.queryByLabelText('QR Code demonstrativo do preview')).not.toBeInTheDocument();
+  });
+
+  it('explains the Trello workflow immediately after authorization', async () => {
+    const api = createApi(true);
+    const setup = {
+      ...structuredClone(demoOnboarding.trello!),
+      connected: true,
+      accountName: 'Marina Costa',
+    };
+    const connectedStatus: OnboardingStatus = {
+      ...structuredClone(demoOnboarding),
+      step: 3,
+      trelloConnected: true,
+      trello: setup,
+    };
+    api.getOnboarding = vi.fn(async () => connectedStatus);
+    api.getTrelloSetup = vi.fn(async () => setup);
+
+    render(<OnboardingFlow api={api} onComplete={vi.fn()} />);
+
+    expect(await screen.findByRole('heading', { name: 'Como o Atlas usa o Trello' })).toBeInTheDocument();
+    expect(screen.getByText('O quadro reúne seu trabalho, cada lista representa uma fase e cada cartão é uma tarefa.')).toBeInTheDocument();
+    expect(screen.getByText('Sincronização em duas vias')).toBeInTheDocument();
+    expect(screen.getByText(/Na próxima etapa você escolhe o quadro/)).toBeInTheDocument();
   });
 });

@@ -34,7 +34,7 @@ interface OnboardingFlowProps {
 const steps = [
   { label: 'Seu perfil', hint: 'Como Atlas ajuda você', icon: UserRound },
   { label: 'Conheça Atlas', hint: 'Seu assistente pessoal', icon: Sparkles },
-  { label: 'WhatsApp', hint: 'Leia o QR Code', icon: Smartphone },
+  { label: 'WhatsApp pessoal', hint: 'Leitura protegida', icon: Smartphone },
   { label: 'Trello', hint: 'Autorize o acesso', icon: Link2 },
   { label: 'Seu fluxo', hint: 'Mapeie as listas', icon: KeyRound },
   { label: 'Conversas', hint: 'Escolha o que acompanhar', icon: MessageCircle },
@@ -285,13 +285,13 @@ export function OnboardingFlow({ api, onComplete, onExitPreview }: OnboardingFlo
 
           {step === 2 && (
             <div className="onboarding-content connector-step">
-              <span className="eyebrow">Conexão principal</span><h1>Conecte seu WhatsApp principal</h1>
-              <p>Abra “Aparelhos conectados” e leia o QR Code. Atlas interpreta somente as conversas escolhidas e envia lembretes do seu número para você mesmo.</p>
+              <span className="eyebrow">Leitor pessoal</span><h1>Conecte seu WhatsApp para o Atlas ler</h1>
+              <p>Abra “Aparelhos conectados” e leia o QR Code. Esta sessão apenas lê as conversas escolhidas; todo envio será feito pelo número central do Atlas.</p>
               {!whatsapp && <div className="connection-intro"><span className="connection-icon"><Smartphone size={30} /></span><div><strong>Pronto para parear</strong><span>O código expira rapidamente e pode ser renovado.</span></div><button className="button button--primary" type="button" onClick={() => void startWhatsApp()} disabled={working}>{working ? <Spinner label="Gerando" /> : <>Gerar QR Code <ArrowRight size={16} /></>}</button></div>}
               {whatsapp && !whatsappConnected && whatsappQrReady && <div className="qr-layout"><div className="qr-card">{whatsapp.qrDataUrl ? <img src={whatsapp.qrDataUrl} alt="QR Code para conectar o WhatsApp" /> : <DemoQr />}<span className="qr-scan-line" aria-hidden="true" /></div><div className="qr-instructions"><strong>Leia com seu celular</strong><ol><li>Abra o WhatsApp</li><li>Toque em Aparelhos conectados</li><li>Escolha Conectar aparelho</li><li>Aponte para este código</li></ol><button type="button" className="text-link" onClick={() => void startWhatsApp()} disabled={working}><RefreshCw size={14} /> Renovar QR Code</button></div></div>}
               {whatsapp && !whatsappConnected && whatsappWaiting && <div className="connection-intro"><span className="connection-icon"><Spinner label={whatsapp.status === 'reconnecting' ? 'Reconectando' : 'Preparando'} /></span><div><strong>{whatsapp.status === 'reconnecting' ? 'Reconectando seu WhatsApp' : 'Preparando um QR Code seguro'}</strong><span>{whatsapp.status === 'reconnecting' ? 'Sua sessão persistida está sendo retomada; não leia outro código ainda.' : 'Aguarde alguns instantes. O código real aparecerá assim que estiver pronto.'}</span></div></div>}
               {whatsapp && !whatsappConnected && !whatsappWaiting && !whatsappQrReady && <div className="connection-intro connection-intro--error"><span className="connection-icon"><AlertTriangle size={24} /></span><div><strong>{whatsapp.status === 'error' ? 'Não foi possível conectar' : 'WhatsApp desconectado'}</strong><span>{whatsapp.error || 'Gere um novo QR Code para tentar novamente.'}</span></div><button className="button button--secondary" type="button" onClick={() => void startWhatsApp()} disabled={working}>{working ? <Spinner label="Tentando" /> : <><RefreshCw size={14} /> Tentar novamente</>}</button></div>}
-              {whatsappConnected && <div className="connection-success"><CheckCircle2 size={28} /><div><strong>WhatsApp conectado</strong><span>{whatsapp.phoneLabel || 'Sua sessão está pronta.'}</span></div></div>}
+              {whatsappConnected && <div className="connection-success"><CheckCircle2 size={28} /><div><strong>WhatsApp pessoal conectado somente para leitura</strong><span>{whatsapp.phoneLabel ? `${whatsapp.phoneLabel} identificado automaticamente` : 'Seu número foi identificado automaticamente.'}</span></div></div>}
               <div className="security-note"><LockKeyhole size={15} /> Atlas nunca pede o código recebido por SMS nem sua senha.</div>
             </div>
           )}
@@ -299,7 +299,25 @@ export function OnboardingFlow({ api, onComplete, onExitPreview }: OnboardingFlo
           {step === 3 && (
             <div className="onboarding-content connector-step">
               <span className="eyebrow">Tarefas conectadas</span><h1>Conecte seu Trello</h1><p>Autorize Atlas no fluxo oficial do Trello. Você não precisa copiar chaves ou tokens.</p>
-              {trelloConnected ? <div className="connection-success connection-success--large"><CheckCircle2 size={32} /><div><strong>Trello conectado</strong><span>{trello?.accountName ? `Conta ${trello.accountName} autorizada.` : 'A autorização foi confirmada.'}</span></div></div> : <div className="delegated-auth-card"><span className="delegated-auth-card__icon"><SquareTrello /></span><div><strong>Autorização delegada</strong><p>O Trello mostra exatamente quais permissões serão concedidas. Atlas nunca vê sua senha.</p></div><ul><li><Check size={13} /> Ler o quadro escolhido</li><li><Check size={13} /> Criar e atualizar cartões</li><li><Check size={13} /> Revogar quando quiser</li></ul><button className="button button--primary button--wide" type="button" onClick={() => void connectTrello()} disabled={working || trelloAuthorizing}>{working || trelloAuthorizing ? <Spinner label="Aguardando autorização" /> : <>Continuar no Trello <ExternalLink size={16} /></>}</button></div>}
+              {trelloConnected ? (
+                <div className="trello-connected-stack">
+                  <div className="connection-success connection-success--large"><CheckCircle2 size={32} /><div><strong>Trello conectado</strong><span>{trello?.accountName ? `Conta ${trello.accountName} autorizada.` : 'A autorização foi confirmada.'}</span></div></div>
+                  <section className="trello-tutorial" aria-labelledby="trello-tutorial-title">
+                    <header><span className="delegated-auth-card__icon"><SquareTrello /></span><div><span className="eyebrow">Tutorial rápido</span><h2 id="trello-tutorial-title">Como o Atlas usa o Trello</h2><p>O quadro reúne seu trabalho, cada lista representa uma fase e cada cartão é uma tarefa.</p></div></header>
+                    <div className="trello-tutorial__flow" aria-label="Fluxo de uma tarefa no Trello">
+                      <article><span>1</span><div><strong>Entrada</strong><small>Uma mensagem ou ideia vira cartão.</small></div></article>
+                      <article><span>2</span><div><strong>Em andamento</strong><small>O cartão mostra o que está sendo feito.</small></div></article>
+                      <article><span>3</span><div><strong>Pausado</strong><small>Use quando faltar contexto ou resposta.</small></div></article>
+                      <article><span>4</span><div><strong>Concluído</strong><small>Finalize para o Atlas registrar o resultado.</small></div></article>
+                    </div>
+                    <div className="trello-tutorial__rules">
+                      <p><CheckCircle2 size={15} /><span><strong>Sincronização em duas vias</strong> — alterações feitas no Atlas ou no Trello permanecem alinhadas.</span></p>
+                      <p><ShieldCheck size={15} /><span><strong>Seu conteúdo continua seu</strong> — o Atlas preserva descrições manuais e altera somente a área que ele gerencia.</span></p>
+                    </div>
+                    <p className="trello-tutorial__next"><ArrowRight size={15} /> Na próxima etapa você escolhe o quadro e relaciona suas listas com essas quatro fases.</p>
+                  </section>
+                </div>
+              ) : <div className="delegated-auth-card"><span className="delegated-auth-card__icon"><SquareTrello /></span><div><strong>Autorização delegada</strong><p>O Trello mostra exatamente quais permissões serão concedidas. Atlas nunca vê sua senha.</p></div><ul><li><Check size={13} /> Ler o quadro escolhido</li><li><Check size={13} /> Criar e atualizar cartões</li><li><Check size={13} /> Revogar quando quiser</li></ul><button className="button button--primary button--wide" type="button" onClick={() => void connectTrello()} disabled={working || trelloAuthorizing}>{working || trelloAuthorizing ? <Spinner label="Aguardando autorização" /> : <>Continuar no Trello <ExternalLink size={16} /></>}</button></div>}
             </div>
           )}
 
@@ -312,7 +330,7 @@ export function OnboardingFlow({ api, onComplete, onExitPreview }: OnboardingFlo
           )}
 
           {step === 6 && (
-            <div className="onboarding-content reminder-review"><span className="eyebrow">Última revisão</span><h1>Quando Atlas deve falar com você?</h1><p>Você receberá briefings e alertas no seu próprio WhatsApp, respeitando o horário silencioso.</p><div className="reminder-review__grid"><label><span><BellRing size={16} /><strong>Briefing da manhã</strong></span><input type="time" value={reminderTimes[0]} onChange={(event) => setReminderTimes([event.target.value, reminderTimes[1]])} /></label><label><span><BellRing size={16} /><strong>Briefing da tarde</strong></span><input type="time" value={reminderTimes[1]} onChange={(event) => setReminderTimes([reminderTimes[0], event.target.value])} /></label><article><span><Clock3 size={16} /><strong>Horário silencioso</strong></span><p>{profile.quietStart} até {profile.quietEnd}</p></article><label className="reminder-toggle"><span><MessageCircle size={16} /><span><strong>Enviar para “Eu mesmo”</strong><small>Do seu número principal para você.</small></span></span><span className="switch"><input type="checkbox" checked={notifySelf} onChange={(event) => setNotifySelf(event.target.checked)} /><i /></span></label></div><div className="atlas-promise"><Sparkles size={19} /><div><strong>Começarei com calma.</strong><p>Vou priorizar até três itens, consolidar alertas vencidos e aprender com o que você concluir, adiar ou corrigir.</p></div></div></div>
+            <div className="onboarding-content reminder-review"><span className="eyebrow">Última revisão</span><h1>Quando Atlas deve falar com você?</h1><p>Você receberá briefings e alertas enviados pelo número central do Atlas, respeitando o horário silencioso.</p><div className="reminder-review__grid"><label><span><BellRing size={16} /><strong>Briefing da manhã</strong></span><input type="time" value={reminderTimes[0]} onChange={(event) => setReminderTimes([event.target.value, reminderTimes[1]])} /></label><label><span><BellRing size={16} /><strong>Briefing da tarde</strong></span><input type="time" value={reminderTimes[1]} onChange={(event) => setReminderTimes([reminderTimes[0], event.target.value])} /></label><article><span><Clock3 size={16} /><strong>Horário silencioso</strong></span><p>{profile.quietStart} até {profile.quietEnd}</p></article><label className="reminder-toggle"><span><MessageCircle size={16} /><span><strong>Receber mensagens do Atlas</strong><small>O número mãe conversa com você; sua sessão pessoal nunca envia.</small></span></span><span className="switch"><input type="checkbox" checked={notifySelf} onChange={(event) => setNotifySelf(event.target.checked)} /><i /></span></label></div><div className="atlas-promise"><Sparkles size={19} /><div><strong>Começarei com calma.</strong><p>Vou priorizar até três itens, consolidar alertas vencidos e aprender com o que você concluir, adiar ou corrigir.</p></div></div></div>
           )}
 
           <footer className="onboarding-actions">

@@ -3,7 +3,7 @@ import { createDatabase } from "@atlas/database";
 import {
   BaileysSessionManager,
   DeepSeekDecisionClient,
-  WhatsAppSelfNotificationChannel,
+  WhatsAppMotherNotificationChannel,
   type WhatsAppSessionEvent,
 } from "@atlas/integrations";
 import {
@@ -39,6 +39,7 @@ async function main(): Promise<void> {
   const sessions = new BaileysSessionManager({
     authRepository: repository,
     selectedChats: repository,
+    allowSending: false,
     onEvent: async (event: WhatsAppSessionEvent) => {
       if (event.type === "qr") {
         await repository.updateWhatsappState(event.userId, {
@@ -53,6 +54,7 @@ async function main(): Promise<void> {
           selfJid: event.selfJid,
           ...(event.displayName !== undefined ? { displayName: event.displayName } : {}),
         });
+        await repository.enqueueWelcomeIfNeeded(event.userId);
         return;
       }
       if (event.type === "disconnected") {
@@ -116,6 +118,67 @@ async function main(): Promise<void> {
     },
   });
 
+  const motherSessions = new BaileysSessionManager({
+    authRepository: repository.platformAuthRepository(),
+    selectedChats: { isSelected: async () => false },
+    acceptAllTextMessages: true,
+    allowSending: true,
+    onEvent: async (event: WhatsAppSessionEvent) => {
+      if (event.type === "qr") {
+        await repository.updatePlatformWhatsappState({ status: "pairing", qrDataUrl: event.dataUrl });
+        return;
+      }
+      if (event.type === "connected") {
+        await repository.updatePlatformWhatsappState({ status: "connected", selfJid: event.selfJid });
+        return;
+      }
+      if (event.type === "disconnected") {
+        await repository.updatePlatformWhatsappState({ status: event.retrying ? "reconnecting" : "disconnected" });
+        return;
+      }
+      if (event.type === "logged_out") {
+        await repository.updatePlatformWhatsappState({ status: "logged_out" });
+        return;
+      }
+      if (event.type === "error") {
+        logger.error({ error: event.error }, "Central WhatsApp session error");
+        await repository.updatePlatformWhatsappState({ status: "error", error: event.error.message });
+        return;
+      }
+      if (event.type === "conversations" || event.message.fromMe) return;
+      if (event.message.chatJid.endsWith("@g.us")) return;
+      const userId = await repository.findUserByWhatsappJid(event.message.senderJid);
+      if (!userId) {
+        logger.warn({ senderJid: event.message.senderJid }, "Ignoring central WhatsApp message from an unknown number");
+        return;
+      }
+      const message = normalizedMessageSchema.parse({ ...event.message, userId, fromMe: false });
+      if (!(await repository.persistMotherMessage(message))) return;
+      const command = parseAtlasSelfCommand(message.text);
+      if (command) {
+        const handling = await repository.handleSelfCommand(userId, command, message.id);
+        if (handling.task) {
+          await boss.send(QUEUES.trello, {
+            userId,
+            batchKey: `mother-command:${message.id}`,
+            task: handling.task.task,
+            allowedCandidateCardIds: handling.task.allowedCandidateCardIds,
+            allowedMemberIds: handling.task.allowedMemberIds,
+            attempt: 0,
+          } satisfies TrelloTaskJob);
+        }
+        if (handling.notification) {
+          await repository.enqueueNotification(
+            { userId, ...handling.notification },
+            `mother-command:${message.id}:reply`,
+          );
+        }
+        return;
+      }
+      if (await repository.isAutomationEnabled(userId, "message_ingestion")) batcher.add(message);
+    },
+  });
+
   batcher = new ConversationBatcher({
     quietWindowMs: config.BATCH_QUIET_SECONDS * 1_000,
     maxWindowMs: config.BATCH_MAX_SECONDS * 1_000,
@@ -156,7 +219,7 @@ async function main(): Promise<void> {
     baseURL: config.DEEPSEEK_BASE_URL,
     model: config.DEEPSEEK_MODEL,
   });
-  const notificationChannel = new WhatsAppSelfNotificationChannel(sessions);
+  const notificationChannel = new WhatsAppMotherNotificationChannel(motherSessions, repository);
   await registerHandlers({ boss, repository, deepSeek, notificationChannel, config });
 
   const controlWorkerId = `atlas-control-${randomUUID()}`;
@@ -318,6 +381,12 @@ async function main(): Promise<void> {
       await reconcileWhatsAppSessions(connections, sessions, (userId, error) => {
         logger.error({ error, userId }, "Could not start WhatsApp session");
       });
+      const motherStatus = await repository.platformWhatsappStatus();
+      if (["pairing", "connected", "reconnecting"].includes(motherStatus)) {
+        if (!motherSessions.hasSession("mother")) await motherSessions.start("mother");
+      } else if (motherSessions.hasSession("mother")) {
+        await motherSessions.stop("mother");
+      }
     } finally {
       sessionSyncRunning = false;
     }
@@ -329,15 +398,32 @@ async function main(): Promise<void> {
   );
   await processControlJobs();
   const controlJobWatcher = setInterval(() => void processControlJobs(), 3_000);
+  let outboxSweepRunning = false;
+  const sweepMotherOutbox = async () => {
+    if (outboxSweepRunning) return;
+    outboxSweepRunning = true;
+    try {
+      const ids = await repository.listPendingMotherOutboxIds();
+      for (const outboxId of ids) {
+        await boss.send(QUEUES.notification, { outboxId, attempt: 0 } satisfies NotificationJob);
+      }
+    } finally {
+      outboxSweepRunning = false;
+    }
+  };
+  await sweepMotherOutbox();
+  const outboxWatcher = setInterval(() => void sweepMotherOutbox(), 3_000);
   logger.info("Atlas worker started");
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Stopping Atlas worker");
     clearInterval(sessionWatcher);
     clearInterval(controlJobWatcher);
+    clearInterval(outboxWatcher);
     if (activeControlRun) await activeControlRun;
     await batcher.flushAll();
     await Promise.all(sessions.listSessionUserIds().map((userId) => sessions.suspend(userId)));
+    await Promise.all(motherSessions.listSessionUserIds().map((sessionKey) => motherSessions.suspend(sessionKey)));
     await boss.stop({ graceful: true, timeout: 30_000 });
     await database.close();
     process.exit(0);

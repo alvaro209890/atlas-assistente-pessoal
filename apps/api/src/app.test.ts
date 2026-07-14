@@ -45,6 +45,28 @@ describe('API health probes', () => {
     expect((await app.inject({ method: 'GET', url: '/health' })).statusCode).toBe(200);
     expect((await app.inject({ method: 'GET', url: '/ready' })).statusCode).toBe(503);
   });
+
+  it('serves the admin WhatsApp console without a user session', async () => {
+    const database = fakeDatabase({
+      query: async <T extends QueryResultRow>(text: string) => {
+        if (text.includes('FROM platform_whatsapp_connection')) {
+          return {
+            ...emptyResult<T>(), rowCount: 1, rows: [{
+              display_name: 'WhatsApp mãe do Atlas', status: 'disconnected', phone_number: null,
+              pairing_qr: null, pairing_expires_at: null, last_connected_at: null, last_error: null,
+              welcome_message: 'Mensagem de boas-vindas para {nome}.', updated_at: new Date(),
+            } as T],
+          };
+        }
+        return emptyResult<T>();
+      },
+    });
+    const app = await buildApp({ database, config: loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'silent' }), logger: false });
+    apps.push(app);
+    const response = await app.inject({ method: 'GET', url: '/api/admin/whatsapp' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ status: 'disconnected', displayName: 'WhatsApp mãe do Atlas' });
+  });
 });
 describe('WhatsApp status contract', () => {
   it('preserves reconnecting and only reports qr when a code exists', () => {

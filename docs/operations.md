@@ -17,7 +17,11 @@
 
 Com Docker, `docker compose up --build` inicia o PostgreSQL, aplica as migrações e libera API, worker e web nessa ordem.
 
-O estado Baileys é persistido por usuário no PostgreSQL. Não versione `.env`, dumps, credenciais, sessões ou diretórios de build.
+O estado Baileys pessoal é persistido por usuário no PostgreSQL; o estado do número central usa registros separados. Não versione `.env`, dumps, credenciais, sessões ou diretórios de build.
+
+Depois de iniciar API, worker e web, abra `http://localhost:5173/admin` (ou `/admin` no domínio publicado), clique em **Gerar QR Code** e leia o código com o único WhatsApp central. O painel está deliberadamente sem senha nesta fase. Em seguida, cada usuário conecta o WhatsApp pessoal no onboarding; o número é identificado pelo QR, a mensagem de boas-vindas é enfileirada automaticamente e a conexão do Trello passa por um tutorial antes do mapeamento das listas.
+
+O fluxo funcional completo e as rotas administrativas estão documentados no [guia de WhatsApp e Trello](whatsapp-trello-guide.md).
 
 ## Valores importantes
 
@@ -45,7 +49,7 @@ npm audit --omit=dev --audit-level=moderate
 
 `release:check` executa typecheck, testes, build e a varredura de publicação. Testes PostgreSQL usam `TEST_DATABASE_URL`; testes reais do DeepSeek exigem `RUN_LIVE_AI_TESTS=1`.
 
-Conforme a limitação deste ambiente, a validação local não abre navegador, Chrome, Playwright ou screenshots. Componentes são cobertos com Vitest/jsdom e o frontend pelo build de produção.
+Além do Vitest/jsdom e do build de produção, mudanças visuais devem ser conferidas em navegador real nos tamanhos desktop e celular. O pareamento real de WhatsApp continua dependendo de PostgreSQL, worker ativo e aparelhos disponíveis.
 
 ## CI
 

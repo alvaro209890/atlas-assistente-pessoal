@@ -396,12 +396,12 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
         {mobileNavIds.map((id) => {
           const item = navItems.find((entry) => entry.id === id)!;
           const Icon = item.icon;
-          return <button type="button" key={id} className={activeView === id ? 'is-active' : ''} onClick={() => navigate(id)}><Icon size={19} /><span>{item.label}</span></button>;
+          return <button type="button" key={id} aria-current={activeView === id ? 'page' : undefined} className={activeView === id ? 'is-active' : ''} onClick={() => navigate(id)}><Icon size={19} /><span>{item.label}</span></button>;
         })}
-        <button type="button" className={!mobileNavIds.includes(activeView) ? 'is-active' : ''} onClick={() => setMobileMenuOpen(true)}><Menu size={19} /><span>Mais</span></button>
+        <button type="button" aria-current={!mobileNavIds.includes(activeView) ? 'page' : undefined} aria-expanded={mobileMenuOpen} className={!mobileNavIds.includes(activeView) ? 'is-active' : ''} onClick={() => setMobileMenuOpen(true)}><Menu size={19} /><span>Mais</span></button>
       </nav>
 
-      {mobileMenuOpen && <div className="mobile-sheet-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setMobileMenuOpen(false)}><section className="mobile-sheet"><header><strong>Mais opções</strong><button type="button" onClick={() => setMobileMenuOpen(false)}><X size={18} /></button></header>{navItems.filter((item) => !mobileNavIds.includes(item.id)).map((item) => { const Icon = item.icon; return <button type="button" key={item.id} className={activeView === item.id ? 'is-active' : ''} onClick={() => navigate(item.id)}><Icon size={18} /><span>{item.label}</span><ChevronDown size={14} /></button>; })}</section></div>}
+      {mobileMenuOpen && <div className="mobile-sheet-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setMobileMenuOpen(false)}><section className="mobile-sheet"><header><strong>Mais opções</strong><button type="button" onClick={() => setMobileMenuOpen(false)} aria-label="Fechar menu"><X size={18} /></button></header>{navItems.filter((item) => !mobileNavIds.includes(item.id)).map((item) => { const Icon = item.icon; return <button type="button" key={item.id} aria-current={activeView === item.id ? 'page' : undefined} className={activeView === item.id ? 'is-active' : ''} onClick={() => navigate(item.id)}><span className="mobile-sheet__icon"><Icon size={18} /></span><span><strong>{item.label}</strong><small>{item.description}</small></span><ChevronDown size={14} /></button>; })}</section></div>}
 
       <CommandPalette open={paletteOpen} activeView={activeView} onClose={() => setPaletteOpen(false)} onNavigate={navigate} onNewNote={() => void createNote()} onToggleAi={() => setAiMobileOpen(true)} />
       {toast && <div className="toast" role="status"><Check size={14} /> {toast}</div>}
@@ -410,7 +410,7 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
 }
 
 function NavGroup({ items, activeView, onNavigate }: { items: typeof navItems; activeView: NavId; onNavigate(view: NavId): void }) {
-  return <div className="nav-group">{items.map((item) => { const Icon = item.icon; return <button type="button" key={item.id} className={activeView === item.id ? 'is-active' : ''} onClick={() => onNavigate(item.id)}><Icon size={17} /><span>{item.label}</span></button>; })}</div>;
+  return <div className="nav-group">{items.map((item) => { const Icon = item.icon; return <button type="button" key={item.id} aria-current={activeView === item.id ? 'page' : undefined} className={activeView === item.id ? 'is-active' : ''} onClick={() => onNavigate(item.id)}><span className="nav-group__icon"><Icon size={17} /></span><span className="nav-group__copy"><strong>{item.label}</strong><small>{item.description}</small></span><i aria-hidden="true" /></button>; })}</div>;
 }
 
 function WorkspaceSkeleton() {

@@ -4,6 +4,7 @@ import {
   createPersistentAuthenticationState,
   createQrDataUrl,
   extractTextMessageContent,
+  normalizeBrazilianPhone,
   shouldProcessWhatsAppChat,
   type BaileysAuthRepository,
 } from "../src/index.js";
@@ -60,5 +61,16 @@ describe("WhatsApp integration", () => {
     expect(shouldProcessWhatsAppChat("5511999@s.whatsapp.net", "5511999:12@s.whatsapp.net", false)).toBe(true);
     expect(shouldProcessWhatsAppChat("group@g.us", "5511999@s.whatsapp.net", false)).toBe(false);
     expect(shouldProcessWhatsAppChat("selected@g.us", "5511999@s.whatsapp.net", true)).toBe(true);
+  });
+
+  it("adds Brazil country code 55 to national phone numbers and accepts Baileys JIDs", () => {
+    expect(normalizeBrazilianPhone("66984396232")).toMatchObject({
+      digits: "5566984396232",
+      e164: "+5566984396232",
+      jid: "5566984396232@s.whatsapp.net",
+      formatted: "+55 (66) 98439-6232",
+    });
+    expect(normalizeBrazilianPhone("5566984396232:17@s.whatsapp.net")?.national).toBe("66984396232");
+    expect(normalizeBrazilianPhone("123")).toBeNull();
   });
 });

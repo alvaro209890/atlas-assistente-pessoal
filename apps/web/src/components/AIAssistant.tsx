@@ -61,7 +61,9 @@ export function AIAssistant({ api, view, noteId, mobileOpen, tasks = [], onMobil
   const [proposalMergeTargetId, setProposalMergeTargetId] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), [messages, sending]);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [messages, sending]);
 
   const send = async (event?: FormEvent) => {
     event?.preventDefault();

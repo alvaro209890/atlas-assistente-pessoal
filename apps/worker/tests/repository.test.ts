@@ -191,7 +191,7 @@ describe("WorkerRepository reliability", () => {
       userTransaction: async (_userId: string, callback: (client: { query: typeof clientQuery }) => Promise<void>) => callback({ query: clientQuery }),
     } as unknown as Database;
     const repository = new WorkerRepository(database);
-    await repository.updateWhatsappState("user-1", { status: "connected", selfJid: "5511@s.whatsapp.net", displayName: "Nome do WhatsApp" });
+    await repository.updateWhatsappState("user-1", { status: "connected", selfJid: "5566984396232@s.whatsapp.net", displayName: "Nome do WhatsApp" });
     const sql = clientQuery.mock.calls.map((call) => String(call[0])).join("\n");
     expect(sql).toContain("whatsapp_name_suggestion");
     expect(sql).not.toContain("preferred_name");
@@ -590,9 +590,10 @@ describe("WorkerRepository control and automation contracts", () => {
     const sql = String(query.mock.calls[0]?.[0]);
     expect(sql).toContain("a.kind = 'pending_reminder'");
     expect(sql).toContain("a.enabled = true");
-    expect(sql).toContain("wc.status='connected'");
     expect(sql).toContain("wc.self_jid IS NOT NULL");
-    expect(sql).toContain("connected_whatsapp ON true");
+    expect(sql).toContain("registered_whatsapp ON true");
+    expect(sql).toContain("platform_whatsapp_connection");
+    expect(sql).toContain("pw.status='connected'");
     expect(sql).toContain("feature_flags->>'notifySelf'");
     expect(sql).toContain("= true");
   });

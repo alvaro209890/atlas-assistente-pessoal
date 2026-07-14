@@ -5,10 +5,16 @@ import { AuthScreen } from './auth/AuthScreen';
 import { LoadingScreen } from './components/ui';
 import { OnboardingFlow } from './onboarding/OnboardingFlow';
 import { Workspace } from './workspace/Workspace';
+import { AdminApp } from './admin/AdminApp';
 
 const previewFromUrl = () => new URLSearchParams(window.location.search).get('preview') === 'demo';
 
 export function App() {
+  if (window.location.pathname.startsWith('/admin')) return <AdminApp />;
+  return <UserApp />;
+}
+
+function UserApp() {
   const [preview, setPreview] = useState(previewFromUrl);
   const [session, setSession] = useState<Session | null>(null);
   const [booting, setBooting] = useState(true);

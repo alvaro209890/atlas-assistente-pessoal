@@ -28,6 +28,8 @@ describe('database migrations', () => {
       'reminders', 'reminder_occurrences', 'commitments', 'assistant_learnings',
       'assistant_learning_evidence', 'assistant_action_outcomes', 'brain_node_sources',
       'action_proposals',
+      'platform_whatsapp_connection', 'platform_whatsapp_auth_records',
+      'platform_whatsapp_messages',
     ]) {
       expect(sql).toContain(`CREATE TABLE IF NOT EXISTS ${table}`);
     }
@@ -40,5 +42,6 @@ describe('database migrations', () => {
     expect(sql).toContain('task_events_actor_tenant_safe');
     expect(sql).toContain('FOREIGN KEY (notification_outbox_id, user_id)');
     expect(sql).toContain('whatsapp_connections_one_active_per_user_idx');
+    expect(sql).toContain('ADD COLUMN IF NOT EXISTS self_jid');
   });
 });

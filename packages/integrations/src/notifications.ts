@@ -7,6 +7,8 @@ export type NotificationKind =
   | "reply_suggestion"
   | "brief"
   | "reminder"
+  | "welcome"
+  | "admin_message"
   | "integration_error";
 
 export interface Notification {
@@ -38,6 +40,34 @@ export class WhatsAppSelfNotificationChannel implements NotificationChannel {
       : "";
     const externalMessageId = await this.sessions.sendSelf(
       notification.userId,
+      `🧠 *${notification.title}*\n${notification.body}${links}`,
+    );
+    return { channel: this.kind, externalMessageId };
+  }
+}
+
+export interface WhatsAppRecipientResolver {
+  recipientJid(userId: string): Promise<string>;
+}
+
+/** Sends every platform notification through the single admin-managed number. */
+export class WhatsAppMotherNotificationChannel implements NotificationChannel {
+  readonly kind = "platform_mother";
+
+  constructor(
+    private readonly sessions: BaileysSessionManager,
+    private readonly resolver: WhatsAppRecipientResolver,
+    private readonly sessionKey = "mother",
+  ) {}
+
+  async send(notification: Notification): Promise<NotificationReceipt> {
+    const destinationJid = await this.resolver.recipientJid(notification.userId);
+    const links = notification.links?.length
+      ? `\n\n${notification.links.map((link) => `${link.label}: ${link.url}`).join("\n")}`
+      : "";
+    const externalMessageId = await this.sessions.sendText(
+      this.sessionKey,
+      destinationJid,
       `🧠 *${notification.title}*\n${notification.body}${links}`,
     );
     return { channel: this.kind, externalMessageId };

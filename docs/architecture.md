@@ -2,12 +2,12 @@
 
 ## Componentes
 
-- **Web**: React/Vite para cadastro, onboarding, painel Hoje, Inbox, tarefas, aprendizados, editor, grafo e chat.
+- **Web**: React/Vite para cadastro, onboarding, painel Hoje, Inbox, tarefas, aprendizados, editor, grafo, chat e console `/admin`.
 - **API**: Fastify com autenticação por cookie, validação Zod, isolamento por usuário, SSE e APIs de domínio.
 - **Worker**: sessões Baileys, agrupamento de mensagens, DeepSeek, sincronização Trello, lembretes, compromissos e manutenção dos aprendizados.
 - **PostgreSQL**: fonte de verdade para contas, perfis, tarefas canônicas, Segundo Cérebro e filas `pg-boss`.
 
-O frontend nunca recebe chaves do DeepSeek ou do Trello. Toda consulta e mutação usa o `user_id` da sessão autenticada.
+O frontend nunca recebe chaves do DeepSeek ou do Trello. As rotas pessoais usam o `user_id` da sessão autenticada. O console `/admin` e suas rotas de operação do WhatsApp central estão intencionalmente sem login nesta fase local-first.
 
 ## Perfil e onboarding
 
@@ -15,9 +15,13 @@ O cadastro exige `preferredName`; `fullName` é opcional. O perfil guarda área 
 
 O onboarding coleta o perfil antes de conectar WhatsApp e Trello. Um nome obtido do WhatsApp é apenas sugestão e nunca substitui o perfil sem confirmação.
 
+Depois que a autorização delegada do Trello é confirmada, o onboarding apresenta um tutorial curto sobre quadro, listas, cartões, sincronização e preservação do conteúdo manual. Só então a pessoa segue para o mapeamento das quatro fases canônicas. A navegação selecionável informa título e finalidade de cada área e expõe o estado atual semanticamente com `aria-current` ou `aria-selected`.
+
+Existem duas classes de sessão Baileys: uma sessão pessoal por usuário, com envio bloqueado no próprio adaptador, e uma sessão central singleton (`mother`), conectada pelo admin e autorizada a enviar. Ao abrir a sessão pessoal, o `self_jid` identifica e normaliza automaticamente o telefone brasileiro; entradas nacionais como `66984396232` usam `55` como DDI padrão.
+
 ## Mensagens e decisões
 
-1. Baileys persiste texto ou legenda de uma conversa autorizada.
+1. O Baileys pessoal persiste texto ou legenda de uma conversa autorizada, sem permissão de envio.
 2. Mensagens são agrupadas por dez segundos, com limite de trinta.
 3. O contexto inclui mensagens, tarefa e cartões candidatos, memórias, aprendizados com escopo e correções semelhantes.
 4. DeepSeek V4 Flash devolve uma decisão estruturada e versionada.
@@ -38,9 +42,9 @@ Um fingerprint por usuário evita duplicação entre lotes. O marcador novo é `
 
 `reminders` define a regra e `reminder_occurrences` representa cada disparo. Ocorrências são reivindicadas com lock, possuem deduplicação e respeitam fuso e horário silencioso.
 
-`commitments` diferencia `owed_by_me` de `owed_to_me`. O Atlas acompanha follow-ups e prepara respostas, mas nunca envia mensagens automaticamente a contatos.
+`commitments` diferencia `owed_by_me` de `owed_to_me`. O Atlas acompanha follow-ups e prepara respostas, mas nunca envia mensagens aos contatos monitorados. Boas-vindas, lembretes e respostas ao próprio usuário saem do número central.
 
-No chat próprio, comandos naturais podem confirmar, adiar, reagendar, silenciar ou abrir a última tarefa relacionada. Conversas externas continuam exigindo o prefixo `trello:` para mensagens enviadas pela própria pessoa.
+Na conversa com o número central, comandos naturais podem confirmar, adiar, reagendar, silenciar ou abrir a última tarefa relacionada. O remetente é associado à conta pelo `self_jid` capturado no QR pessoal.
 
 ## Aprendizado
 

@@ -7,12 +7,14 @@ O Atlas possui personalidade masculina, direta, humana e calma. Ele usa o nome p
 ## Recursos
 
 - Cadastro, perfil e onboarding independentes por usuário.
-- WhatsApp principal conectado por QR Code, com seleção explícita das conversas monitoradas.
+- WhatsApp pessoal conectado por QR Code somente para leitura, com seleção explícita das conversas monitoradas.
+- WhatsApp central (número mãe) conectado em `/admin`, usado para boas-vindas, lembretes e conversa com todos os usuários.
 - Trello como projeção sincronizada de tarefas canônicas mantidas pelo Atlas.
+- Tutorial visual logo após conectar o Trello, explicando quadros, listas, cartões e o mapeamento das quatro fases.
 - Criação, atualização, reabertura, conclusão confirmada, comentários, checklists nativos e deduplicação.
 - Lembretes por prazo, recorrência, snooze, horário silencioso e recuperação após indisponibilidade.
 - Compromissos “eu devo” e “estão me devendo”, respostas pendentes e follow-ups.
-- Comandos naturais no WhatsApp da própria pessoa, como “feito”, “adiar 1h” e “amanhã às 9”.
+- Comandos naturais enviados ao número central do Atlas, como “feito”, “adiar 1h” e “amanhã às 9”.
 - Aprendizados com escopo, confiança, evidências, histórico, confirmação, pausa e esquecimento.
 - Segundo Cérebro no PostgreSQL com notas manuais, conteúdo gerado, wikilinks, backlinks, fontes, revisões, grafo e chat.
 - Chat com respostas fundamentadas e propostas confirmáveis de ação.
@@ -20,7 +22,7 @@ O Atlas possui personalidade masculina, direta, humana e calma. Ele usa o nome p
 - DeepSeek V4 Flash com thinking habilitado e raciocínio alto.
 - Eventos em tempo real por SSE e execução assíncrona com `pg-boss`.
 
-Nenhuma resposta é enviada automaticamente a contatos. Alertas e sugestões são entregues somente à própria pessoa pelo `NotificationChannel`.
+Nenhuma mensagem sai pela sessão pessoal e nenhuma resposta é enviada aos contatos monitorados. Alertas e sugestões são enviados exclusivamente pelo WhatsApp central para o número da própria pessoa, identificado automaticamente quando ela lê o QR pessoal.
 
 ## Estrutura
 
@@ -32,7 +34,7 @@ packages/*     banco, schemas e integrações compartilhadas
 PostgreSQL     dados multiusuário e filas pg-boss
 ```
 
-Consulte [a arquitetura](docs/architecture.md), [a operação](docs/operations.md) e [a personalidade do Atlas](docs/atlas-personality.md).
+Consulte [a arquitetura](docs/architecture.md), [a operação](docs/operations.md), [o guia completo de WhatsApp e Trello](docs/whatsapp-trello-guide.md) e [a personalidade do Atlas](docs/atlas-personality.md).
 
 ## Requisitos
 
@@ -52,6 +54,7 @@ npm run dev
 ```
 
 - Interface: `http://localhost:5173`
+- Painel admin sem login: `http://localhost:5173/admin`
 - API: `http://localhost:3000`
 - Health check: `http://localhost:3000/health`
 
@@ -87,7 +90,7 @@ Os testes reais da IA permanecem desligados por padrão. A validação do projet
 
 ## Limites atuais
 
-- Um WhatsApp e um quadro Trello por conta.
+- Um WhatsApp pessoal de leitura e um quadro Trello por conta, além de um único WhatsApp central para toda a plataforma.
 - Texto e legendas são processados; outras mídias são ignoradas.
 - Google Calendar, e-mail, embeddings, equipes, múltiplos números e número secundário ficam para versões futuras.
 - Baileys é uma integração não oficial e pode exigir atualizações quando o WhatsApp mudar.

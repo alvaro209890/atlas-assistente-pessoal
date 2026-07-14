@@ -192,6 +192,46 @@ export interface BaileysSessionManagerOptions {
   authRepository: BaileysAuthRepository;
   selectedChats: SelectedChatRepository;
   onEvent: WhatsAppEventHandler;
+  /** Central sessions receive every direct text; personal sessions stay allow-listed. */
+  acceptAllTextMessages?: boolean;
+  /** Personal reader sessions explicitly disable all outbound sends. */
+  allowSending?: boolean;
+}
+
+export interface BrazilianPhoneIdentity {
+  digits: string;
+  e164: string;
+  jid: string;
+  national: string;
+  formatted: string;
+}
+
+/**
+ * Normalizes either a Brazilian national number or a Baileys JID.
+ * National inputs such as 66984396232 receive the default country code 55.
+ */
+export function normalizeBrazilianPhone(value: string): BrazilianPhoneIdentity | null {
+  const localPart = value.trim().split("@")[0]?.split(":")[0] ?? "";
+  const rawDigits = localPart.replace(/\D/g, "");
+  const digits = rawDigits.length === 10 || rawDigits.length === 11
+    ? `55${rawDigits}`
+    : (rawDigits.length === 12 || rawDigits.length === 13) && rawDigits.startsWith("55")
+      ? rawDigits
+      : "";
+  if (!/^55\d{10,11}$/.test(digits)) return null;
+  const national = digits.slice(2);
+  const areaCode = national.slice(0, 2);
+  const subscriber = national.slice(2);
+  const formattedSubscriber = subscriber.length === 9
+    ? `${subscriber.slice(0, 5)}-${subscriber.slice(5)}`
+    : `${subscriber.slice(0, 4)}-${subscriber.slice(4)}`;
+  return {
+    digits,
+    e164: `+${digits}`,
+    jid: `${digits}@s.whatsapp.net`,
+    national,
+    formatted: `+55 (${areaCode}) ${formattedSubscriber}`,
+  };
 }
 
 export class BaileysSessionManager {
@@ -297,7 +337,8 @@ export class BaileysSessionManager {
           const messageId = item.key.id;
           if (!chatJid || !messageId) continue;
           const selfJid = socket.user?.id ? jidNormalizedUser(socket.user.id) : null;
-          const selected = await this.options.selectedChats.isSelected(userId, chatJid);
+          const selected = this.options.acceptAllTextMessages === true
+            || await this.options.selectedChats.isSelected(userId, chatJid);
           if (!shouldProcessWhatsAppChat(chatJid, selfJid, selected)) continue;
           const text = extractTextMessageContent(item.message);
           if (!text) continue;
@@ -370,6 +411,9 @@ export class BaileysSessionManager {
   }
 
   async sendText(userId: string, destinationJid: string, text: string): Promise<string> {
+    if (this.options.allowSending === false) {
+      throw new IntegrationError("Outbound sending is disabled for this WhatsApp session", false);
+    }
     const socket = this.sockets.get(userId);
     if (!socket) throw new IntegrationError("WhatsApp session is not connected", true);
     const sent = await socket.sendMessage(jidNormalizedUser(destinationJid), { text });

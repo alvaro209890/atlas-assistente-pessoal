@@ -17,22 +17,23 @@ import type { NavId } from '../types';
 export interface NavItem {
   id: NavId;
   label: string;
+  description: string;
   icon: LucideIcon;
   section: 'main' | 'organize' | 'system';
   shortcut?: string;
 }
 
 export const navItems: NavItem[] = [
-  { id: 'today', label: 'Hoje', icon: CalendarDays, section: 'main', shortcut: 'G H' },
-  { id: 'inbox', label: 'Inbox', icon: Inbox, section: 'main', shortcut: 'G I' },
-  { id: 'brain', label: 'Cérebro', icon: Brain, section: 'main', shortcut: 'G C' },
-  { id: 'graph', label: 'Grafo', icon: GitFork, section: 'main', shortcut: 'G G' },
-  { id: 'projects', label: 'Projetos', icon: FolderKanban, section: 'organize' },
-  { id: 'people', label: 'Pessoas', icon: Users, section: 'organize' },
-  { id: 'trello', label: 'Trello', icon: SquareKanban, section: 'organize' },
-  { id: 'learnings', label: 'Aprendizados', icon: Lightbulb, section: 'system' },
-  { id: 'automations', label: 'Automações', icon: Bot, section: 'system' },
-  { id: 'settings', label: 'Configurações', icon: Settings, section: 'system' },
+  { id: 'today', label: 'Hoje', description: 'Prioridades do dia', icon: CalendarDays, section: 'main', shortcut: 'G H' },
+  { id: 'inbox', label: 'Inbox', description: 'Itens para revisar', icon: Inbox, section: 'main', shortcut: 'G I' },
+  { id: 'brain', label: 'Cérebro', description: 'Notas e contexto', icon: Brain, section: 'main', shortcut: 'G C' },
+  { id: 'graph', label: 'Grafo', description: 'Conexões do conhecimento', icon: GitFork, section: 'main', shortcut: 'G G' },
+  { id: 'projects', label: 'Projetos', description: 'Trabalho em movimento', icon: FolderKanban, section: 'organize' },
+  { id: 'people', label: 'Pessoas', description: 'Histórico e relações', icon: Users, section: 'organize' },
+  { id: 'trello', label: 'Trello', description: 'Quadro sincronizado', icon: SquareKanban, section: 'organize' },
+  { id: 'learnings', label: 'Aprendizados', description: 'Regras que o Atlas aprendeu', icon: Lightbulb, section: 'system' },
+  { id: 'automations', label: 'Automações', description: 'Rotinas e lembretes', icon: Bot, section: 'system' },
+  { id: 'settings', label: 'Configurações', description: 'Conta e integrações', icon: Settings, section: 'system' },
 ];
 
 export const mobileNavIds: NavId[] = ['today', 'inbox', 'brain', 'graph'];

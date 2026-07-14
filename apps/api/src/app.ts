@@ -13,6 +13,7 @@ import { registerBrainRoutes } from './routes/brain.js';
 import { registerBrainAdvancedRoutes } from './routes/brain-advanced.js';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerAssistantRoutes } from './routes/assistant.js';
+import { registerAdminRoutes } from './routes/admin.js';
 import { registerIntegrationRoutes } from './routes/integrations.js';
 import { registerPlatformRoutes } from './routes/platform.js';
 import type { AppDatabase } from './types.js';
@@ -93,6 +94,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.get('/api/ready', readinessHandler);
 
   await registerAuthRoutes(app, { database: options.database, config });
+  // Intentionally public for the current local-first phase, as requested.
+  await app.register(async (adminApp) => {
+    await registerAdminRoutes(adminApp, { database: options.database });
+  }, { prefix: '/api/admin' });
   await app.register(async (protectedApp) => {
     protectedApp.addHook('preHandler', makeRequireAuth({ database: options.database, config }));
     await registerBrainRoutes(protectedApp, { database: options.database, events });

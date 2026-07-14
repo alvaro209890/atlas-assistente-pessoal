@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createApi } from '../api';
 import { demoSession, demoWorkspace } from '../demo';
@@ -57,5 +57,31 @@ describe('Workspace live updates', () => {
 
     view.unmount();
     expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it('exposes clear labels and current state in the selectable navigation', async () => {
+    window.location.hash = '';
+    const api = createApi(true);
+    api.getWorkspace = vi.fn(async () => cloneWorkspace());
+
+    render(
+      <Workspace
+        api={api}
+        session={demoSession}
+        onLogout={vi.fn(async () => undefined)}
+        onEnterPreview={vi.fn()}
+        onExitPreview={vi.fn()}
+      />,
+    );
+
+    await screen.findByText(demoWorkspace.briefing);
+    const today = screen.getByRole('button', { name: /HojePrioridades do dia/ });
+    const trello = screen.getByRole('button', { name: /TrelloQuadro sincronizado/ });
+    expect(today).toHaveAttribute('aria-current', 'page');
+    expect(trello).not.toHaveAttribute('aria-current');
+
+    fireEvent.click(trello);
+    expect(trello).toHaveAttribute('aria-current', 'page');
+    expect(today).not.toHaveAttribute('aria-current');
   });
 });
