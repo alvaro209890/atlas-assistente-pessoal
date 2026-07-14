@@ -231,6 +231,25 @@ export async function registerIntegrationRoutes(app: FastifyInstance, deps: Inte
     return result.rows[0];
   });
 
+  app.post('/whatsapp/chats/monitor-all', async (request) => {
+    const user = currentUser(request);
+    const input = parseInput(z.object({ enabled: z.boolean(), connectionId: z.string().uuid().optional() }), request.body);
+    let connectionId = input.connectionId;
+    if (!connectionId) {
+      const connection = await database.query<{ id: string }>(
+        `SELECT id FROM whatsapp_connections WHERE user_id=$1 ORDER BY (status='connected') DESC,created_at DESC LIMIT 1`, [user.id],
+      );
+      connectionId = connection.rows[0]?.id;
+    }
+    if (!connectionId) return { updated: 0 };
+    const result = await database.query(
+      `UPDATE monitored_chats SET enabled=$3 WHERE user_id=$1 AND whatsapp_connection_id=$2`,
+      [user.id, connectionId, input.enabled],
+    );
+    await events.publish(user.id, 'whatsapp.chat.updated', { all: true, enabled: input.enabled }, 'whatsapp');
+    return { updated: result.rowCount ?? 0 };
+  });
+
   async function listTrelloConnections(request: Parameters<typeof currentUser>[0]) {
     const user = currentUser(request);
     const result = await database.query(

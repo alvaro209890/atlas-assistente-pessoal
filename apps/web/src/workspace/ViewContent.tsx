@@ -28,10 +28,11 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { lazy, Suspense, useState } from 'react';
-import type { FeedbackAction, LearningAction, LearningEvidence, Note, NavId, TaskAction, WorkspaceData } from '../types';
+import type { Chat, FeedbackAction, LearningAction, LearningEvidence, Note, NavId, TaskAction, WorkspaceData } from '../types';
 import { EmptyState, ErrorState, Spinner } from '../components/ui';
 import { viewMeta } from './navigation';
 import { LearningsView, PersonalInboxView, PersonalTodayView } from './PersonalAssistantViews';
+import { MonitoredChatsView } from './MonitoredChatsView';
 
 const KnowledgeGraph = lazy(() => import('../components/KnowledgeGraph').then((module) => ({ default: module.KnowledgeGraph })));
 const NoteEditor = lazy(() => import('../components/NoteEditor').then((module) => ({ default: module.NoteEditor })));
@@ -57,6 +58,9 @@ interface ViewContentProps {
   onLoadLearningEvidence(id: string): Promise<LearningEvidence[]>;
   onReplan(): void;
   onCreateAutomation(input: { kind: 'briefing' | 'deadline' | 'overdue' | 'follow_up' | 'stale_task' | 'weekly_review'; time?: string }): void;
+  onLoadChats(): Promise<Chat[]>;
+  onToggleChat(id: string, enabled: boolean): Promise<{ id: string; enabled: boolean }>;
+  onToggleAllChats(enabled: boolean): Promise<{ updated: number }>;
 }
 
 export function ViewContent(props: ViewContentProps) {
@@ -79,6 +83,7 @@ export function ViewContent(props: ViewContentProps) {
 
       {props.activeView === 'today' && <PersonalTodayView data={props.data} onSelectNote={props.onSelectNote} onOpenTask={props.onOpenTask} onTaskAction={props.onTaskAction} onCommitmentAction={props.onCommitmentAction} onReplan={props.onReplan} />}
       {props.activeView === 'inbox' && <PersonalInboxView data={props.data} onOpenTask={props.onOpenTask} onFeedback={props.onFeedback} onLearningAction={props.onLearningAction} />}
+      {props.activeView === 'chats' && <MonitoredChatsView onLoadChats={props.onLoadChats} onToggleChat={props.onToggleChat} onToggleAll={props.onToggleAllChats} />}
       {props.activeView === 'brain' && <BrainView {...props} />}
       {props.activeView === 'graph' && <Suspense fallback={<div className="center-state"><Spinner label="Preparando o grafo" /></div>}><KnowledgeGraph nodes={props.data.graph.nodes} edges={props.data.graph.edges} onOpenNode={props.onSelectNote} /></Suspense>}
       {props.activeView === 'projects' && <ProjectsView data={props.data} />}

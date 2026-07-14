@@ -83,9 +83,27 @@ describe("aiDecisionSchema", () => {
     expect(aiDecisionSchema.safeParse(invalid).success).toBe(false);
   });
 
-  it("rejects a reply with needed false and a draft", () => {
-    const invalid = { ...validDecision, reply: { ...validDecision.reply, needed: false } };
-    expect(aiDecisionSchema.safeParse(invalid).success).toBe(false);
+  it("normaliza um reply needed:false com campos residuais para 'sem resposta'", () => {
+    // O modelo às vezes devolve needed:false mas mantém objective/draft do enum.
+    // Em vez de derrubar todo o triage, o schema reduz ao caso canônico.
+    const parsed = aiDecisionSchema.parse({
+      ...validDecision,
+      reply: { ...validDecision.reply, needed: false },
+    });
+    expect(parsed.reply).toMatchObject({ needed: false, objective: "none", draft: null, tone: null });
+  });
+
+  it("normaliza um reply needed:true incompleto (sem draft) para 'sem resposta'", () => {
+    const parsed = aiDecisionSchema.parse({
+      ...validDecision,
+      reply: { needed: true, objective: "answer", confidence: 0.4 },
+    });
+    expect(parsed.reply.needed).toBe(false);
+  });
+
+  it("preserva um reply needed:true bem formado", () => {
+    const parsed = aiDecisionSchema.parse(validDecision);
+    expect(parsed.reply).toMatchObject({ needed: true, objective: "acknowledge", draft: "Recebi. Envio amanhã." });
   });
 });
 

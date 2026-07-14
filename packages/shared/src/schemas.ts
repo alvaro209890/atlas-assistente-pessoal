@@ -221,7 +221,53 @@ const replySchema = z
   })
   .strict();
 
-export const aiReplySchema = z.discriminatedUnion("needed", [noReplySchema, replySchema]);
+const replyObjectiveValues = [
+  "acknowledge",
+  "ask_missing_information",
+  "confirm_deadline",
+  "follow_up",
+  "answer",
+] as const;
+
+/**
+ * Normaliza o objeto `reply` antes da validação estrita. O modelo às vezes
+ * devolve um `reply` levemente fora do contrato (ex.: `needed:false` com um
+ * `objective` do enum, ou `needed:true` sem `draft`/`tone`). Como a resposta é
+ * apenas uma sugestão mostrada ao dono da conta — nunca enviada sozinha — um
+ * `reply` malformado NÃO deve derrubar todo o triage (que também extrai
+ * tarefas, compromissos e memórias). Aqui reduzimos qualquer forma inválida ao
+ * caso canônico "sem resposta", preservando um reply bem-formado quando existe.
+ */
+export const aiReplySchema = z.preprocess((value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const raw = value as Record<string, unknown>;
+  const confidence = typeof raw.confidence === "number" ? raw.confidence : 0;
+  const draft = typeof raw.draft === "string" ? raw.draft.trim() : "";
+  const tone = typeof raw.tone === "string" ? raw.tone.trim() : "";
+  const objectiveValid = replyObjectiveValues.includes(raw.objective as never);
+  const wantsReply = raw.needed === true || raw.needed === "true";
+  const wellFormed = wantsReply && draft.length > 0 && tone.length > 0 && objectiveValid;
+  if (!wellFormed) {
+    return {
+      needed: false,
+      recipientName: null,
+      recipientJid: null,
+      objective: "none",
+      draft: null,
+      tone: null,
+      confidence,
+    };
+  }
+  return {
+    needed: true,
+    recipientName: typeof raw.recipientName === "string" ? raw.recipientName : null,
+    recipientJid: typeof raw.recipientJid === "string" ? raw.recipientJid : null,
+    objective: raw.objective,
+    draft,
+    tone,
+    confidence,
+  };
+}, z.discriminatedUnion("needed", [noReplySchema, replySchema]));
 
 export const conversationIntentSchema = z.enum([
   "actionable",

@@ -54,6 +54,8 @@ export interface AppApi {
   selectTrelloBoard(boardId: string): Promise<TrelloSetup>;
   saveTrelloMapping(input: { boardId: string; mapping: Record<TrelloListRole, string> }): Promise<TrelloSetup>;
   listChats(): Promise<Chat[]>;
+  updateChat(id: string, enabled: boolean): Promise<{ id: string; enabled: boolean }>;
+  setAllChatsMonitored(enabled: boolean): Promise<{ updated: number }>;
   completeOnboarding(input: { selectedChatIds: string[]; notifySelf: boolean }): Promise<Session>;
   getWorkspace(): Promise<WorkspaceData>;
   listTasks(): Promise<AssistantTask[]>;
@@ -426,6 +428,20 @@ class RealApi implements AppApi {
     return request<Chat[]>('/whatsapp/chats');
   }
 
+  updateChat(id: string, enabled: boolean) {
+    return request<{ id: string; enabled: boolean }>(`/whatsapp/chats/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    });
+  }
+
+  setAllChatsMonitored(enabled: boolean) {
+    return request<{ updated: number }>('/whatsapp/chats/monitor-all', {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    });
+  }
+
   completeOnboarding(input: { selectedChatIds: string[]; notifySelf: boolean }) {
     return request<Session>('/onboarding/complete', { method: 'POST', body: JSON.stringify(input) });
   }
@@ -682,6 +698,16 @@ class PreviewApi implements AppApi {
   async listChats() {
     await pause(260);
     return clone(demoChats);
+  }
+
+  async updateChat(id: string, enabled: boolean) {
+    await pause(120);
+    return { id, enabled };
+  }
+
+  async setAllChatsMonitored(enabled: boolean) {
+    await pause(160);
+    return { updated: demoChats.length, enabled } as { updated: number };
   }
 
   async completeOnboarding() {

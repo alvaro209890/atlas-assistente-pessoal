@@ -1,6 +1,7 @@
 export type NavId =
   | 'today'
   | 'inbox'
+  | 'chats'
   | 'brain'
   | 'graph'
   | 'projects'

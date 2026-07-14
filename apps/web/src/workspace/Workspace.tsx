@@ -374,6 +374,9 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
                  onLoadLearningEvidence={(id) => api.listLearningEvidence(id)}
                  onReplan={() => void replanDay()}
                  onCreateAutomation={(input) => void createAutomation(input)}
+                 onLoadChats={() => api.listChats()}
+                 onToggleChat={(id, enabled) => api.updateChat(id, enabled)}
+                 onToggleAllChats={(enabled) => api.setAllChatsMonitored(enabled)}
               />
             ) : null}
           </div>
