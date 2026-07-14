@@ -370,6 +370,7 @@ export class BaileysSessionManager {
           const text = extractTextMessageContent(item.message);
           if (!text) continue;
           const senderJid = jidNormalizedUser(item.key.participant ?? chatJid);
+          if (!senderJid) continue;
           await this.options.onEvent({
             type: "text_message",
             userId,
