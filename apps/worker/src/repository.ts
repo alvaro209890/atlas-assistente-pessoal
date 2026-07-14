@@ -379,6 +379,32 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
     });
   }
 
+  async upsertContacts(
+    userId: string,
+    contacts: readonly { jid: string; name: string }[],
+  ): Promise<void> {
+    const connectionId = await this.getConnectionId(userId);
+    await this.database.transaction(async (client) => {
+      for (const contact of contacts) {
+        if (!contact.name) continue;
+        await client.query(
+          `UPDATE whatsapp_conversation_catalog
+           SET display_name = $4, updated_at = now()
+           WHERE user_id = $1 AND whatsapp_connection_id = $2 AND jid = $3
+             AND (display_name = '' OR display_name IS NULL)`,
+          [userId, connectionId, contact.jid, contact.name],
+        );
+        await client.query(
+          `UPDATE monitored_chats
+           SET display_name = $4
+           WHERE user_id = $1 AND whatsapp_connection_id = $2 AND jid = $3
+             AND (display_name = '' OR display_name IS NULL)`,
+          [userId, connectionId, contact.jid, contact.name],
+        );
+      }
+    });
+  }
+
   async persistMessage(message: NormalizedMessage): Promise<boolean> {
     const connectionId = await this.getConnectionId(message.userId);
     const result = await this.database.query<IdRow>(

@@ -79,6 +79,10 @@ async function main(): Promise<void> {
         await repository.upsertConversationCatalog(event.userId, event.conversations);
         return;
       }
+      if (event.type === "contacts") {
+        await repository.upsertContacts(event.userId, event.contacts);
+        return;
+      }
 
       const message = normalizedMessageSchema.parse({
         ...event.message,
@@ -145,6 +149,7 @@ async function main(): Promise<void> {
         await repository.updatePlatformWhatsappState({ status: "error", error: event.error.message });
         return;
       }
+      if (event.type === "contacts") return;
       if (event.type === "conversations" || event.message.fromMe) return;
       if (event.message.chatJid.endsWith("@g.us")) return;
       const userId = await repository.findUserByWhatsappJid(event.message.senderJid);

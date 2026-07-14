@@ -35,6 +35,11 @@ export type WhatsAppSessionEvent =
       conversations: WhatsAppConversationCatalogEntry[];
     }
   | {
+      type: "contacts";
+      userId: string;
+      contacts: { jid: string; name: string }[];
+    }
+  | {
       type: "text_message";
       userId: string;
       message: {
@@ -328,6 +333,28 @@ export class BaileysSessionManager {
     });
     socket.ev.on("chats.update", (chats) => {
       void emitConversations(chats).catch((error) => this.emitError(userId, error));
+    });
+
+    const emitContacts = async (rawContacts: readonly { id?: unknown; name?: unknown; notify?: unknown }[]) => {
+      const mapped = rawContacts
+        .filter((c) => typeof c.id === "string" && c.id)
+        .map((c) => ({
+          jid: jidNormalizedUser(c.id as string),
+          name: (typeof c.name === "string" && (c.name as string).trim()) ||
+                (typeof c.notify === "string" && (c.notify as string).trim()) ||
+            "",
+        }))
+        .filter((c) => c.name);
+      if (mapped.length > 0) {
+        await this.options.onEvent({ type: "contacts", userId, contacts: mapped });
+      }
+    };
+
+    socket.ev.on("contacts.upsert", (contacts) => {
+      void emitContacts(contacts).catch((error) => this.emitError(userId, error));
+    });
+    socket.ev.on("contacts.update", (contacts) => {
+      void emitContacts(contacts).catch((error) => this.emitError(userId, error));
     });
 
     socket.ev.on("messages.upsert", ({ messages }) => {
