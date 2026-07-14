@@ -198,7 +198,7 @@ export async function registerPlatformRoutes(app: FastifyInstance, deps: Platfor
   app.post('/onboarding/complete', async (request) => {
     const user = currentUser(request);
     const input = parseInput(z.object({
-      selectedChatIds: z.array(z.string().uuid()).max(500).default([]),
+      selectedChatIds: z.array(z.string().uuid()).max(2000).default([]),
       notifySelf: z.boolean().default(true),
     }), request.body);
     const selectedChatIds = [...new Set(input.selectedChatIds)];
