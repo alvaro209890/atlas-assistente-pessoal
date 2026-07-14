@@ -1,24 +1,19 @@
-import { readFile, readdir } from 'node:fs/promises';
-import { extname, join, relative, resolve } from 'node:path';
+import { execFile } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
+import { extname, join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const ignoredDirectories = new Set(['.git', 'node_modules', 'dist', 'coverage', '.vite']);
+const execFileAsync = promisify(execFile);
 const textExtensions = new Set([
   '', '.css', '.example', '.html', '.js', '.json', '.jsx', '.md', '.mjs',
   '.sql', '.ts', '.tsx', '.txt', '.yaml', '.yml',
 ]);
 
-async function listFiles(directory) {
-  const entries = await readdir(directory, { withFileTypes: true });
-  const files = [];
-  for (const entry of entries) {
-    if (entry.isDirectory() && ignoredDirectories.has(entry.name)) continue;
-    const absolute = join(directory, entry.name);
-    if (entry.isDirectory()) files.push(...await listFiles(absolute));
-    else if (entry.isFile() && textExtensions.has(extname(entry.name))) files.push(absolute);
-  }
-  return files;
+async function listPublishableFiles() {
+  const { stdout } = await execFileAsync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], { cwd: root });
+  return stdout.split('\n').filter(Boolean).filter((file) => textExtensions.has(extname(file)));
 }
 
 const issues = [];
@@ -32,9 +27,8 @@ const secretPatterns = [
   /\bxox[baprs]-[A-Za-z0-9-]{20,}\b/,
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
 ];
-for (const absolute of await listFiles(root)) {
-  const file = relative(root, absolute).replaceAll('\\', '/');
-  const content = await readFile(absolute, 'utf8');
+for (const file of await listPublishableFiles()) {
+  const content = await readFile(join(root, file), 'utf8');
 
   if (secretPatterns.some((pattern) => pattern.test(content))) {
     issues.push(`${file}: parece conter um segredo real`);

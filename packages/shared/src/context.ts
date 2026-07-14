@@ -46,7 +46,9 @@ const DEFAULT_PREFERENCES: AiPreferences = {
 };
 
 export function buildAiContext(input: BuildAiContextInput): AiContext {
-  const maxRecentMessages = Math.min(input.maxRecentMessages ?? 15, 15);
+  // O worker pode montar lotes de até 30 mensagens. Nunca descartamos a
+  // primeira metade do lote antes de a IA ter oportunidade de analisá-la.
+  const maxRecentMessages = Math.min(input.maxRecentMessages ?? 30, 30);
   const maxMemories = Math.min(input.maxMemories ?? 8, 10);
   const maxCorrections = Math.min(input.maxCorrections ?? 8, 12);
   const maxActiveLearnings = Math.min(input.maxActiveLearnings ?? 6, 6);

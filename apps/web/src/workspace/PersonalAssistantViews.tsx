@@ -110,14 +110,17 @@ export function PersonalInboxView({ data, onOpenTask, onFeedback, onLearningActi
   );
 }
 
-export function LearningsView({ learnings, onAction, onLoadEvidence }: {
+export function LearningsView({ learnings, onAction, onTeach, onLoadEvidence }: {
   learnings: AssistantLearning[];
   onAction(id: string, action: LearningAction, statement?: string): void;
+  onTeach(input: { statement: string; title?: string }): void;
   onLoadEvidence(id: string): Promise<LearningEvidence[]>;
 }) {
   const [tab, setTab] = useState<'active' | 'suggested' | 'rejected'>('active');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  const [teaching, setTeaching] = useState(false);
+  const [teachingText, setTeachingText] = useState('');
   const [evidenceOpen, setEvidenceOpen] = useState<string | null>(null);
   const [evidenceByLearning, setEvidenceByLearning] = useState<Record<string, LearningEvidence[]>>({});
   const [evidenceLoading, setEvidenceLoading] = useState<string | null>(null);
@@ -144,7 +147,8 @@ export function LearningsView({ learnings, onAction, onLoadEvidence }: {
   };
   return (
     <div className="learnings-layout">
-      <section className="learning-manifesto"><span><Lightbulb size={20} /></span><div><h2>Aprendizado com controle</h2><p>Atlas mostra o que observou, as evidências e a confiança. Você decide o que continua valendo.</p></div></section>
+      <section className="learning-manifesto"><span><Lightbulb size={20} /></span><div><h2>Aprendizado com controle</h2><p>Atlas mostra o que observou, as evidências e a confiança. Você decide o que continua valendo.</p></div><button type="button" className="button button--primary button--small" onClick={() => setTeaching((open) => !open)}>Ensinar ao Atlas</button></section>
+      {teaching && <section className="learning-edit"><label><span>O que o Atlas deve lembrar?</span><textarea value={teachingText} aria-label="Ensinar ao Atlas" onChange={(event) => setTeachingText(event.target.value)} /></label><div><button type="button" className="button button--primary button--small" disabled={teachingText.trim().length < 3} onClick={() => { onTeach({ statement: teachingText.trim() }); setTeachingText(''); setTeaching(false); }}>Salvar aprendizado</button><button type="button" className="button button--ghost button--small" onClick={() => setTeaching(false)}>Cancelar</button></div></section>}
       <div className="learning-tabs" role="tablist" aria-label="Estados dos aprendizados">{([['active', 'Ativos'], ['suggested', 'Sugestões'], ['rejected', 'Rejeitados']] as const).map(([id, label]) => <button type="button" role="tab" aria-selected={tab === id} className={tab === id ? 'is-active' : ''} key={id} onClick={() => setTab(id)}>{label}<small>{counts[id]}</small></button>)}</div>
       {filtered.length ? <div className="learning-list">{filtered.map((learning) => (
         <article key={learning.id} className={`learning-card learning-card--${learning.status}`}>

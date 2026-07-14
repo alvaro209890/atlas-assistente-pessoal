@@ -19,6 +19,8 @@ O Atlas possui personalidade masculina, direta, humana e calma. Ele usa o nome p
 - Contexto de grupos com identificação de menções e respostas ao dono, evitando transformar pedidos destinados a terceiros em tarefas pessoais.
 - Grupos de conversas e classificação gradual somente entre contatos com monitoramento autorizado.
 - Aprendizados com escopo, confiança, evidências, histórico, confirmação, pausa e esquecimento.
+- Observações, fatos e decisões relevantes viram notas auditáveis no Segundo Cérebro, com fonte WhatsApp e vínculos às tarefas relacionadas.
+- “Ensinar ao Atlas” cria um aprendizado explícito e uma nota vinculada, pesquisável e controlada pela própria pessoa.
 - Segundo Cérebro no PostgreSQL com notas manuais, conteúdo gerado, wikilinks, backlinks, fontes, revisões e grafo.
 - Briefings às 08:00 e 18:00, configuráveis por conta.
 - DeepSeek V4 Flash com thinking habilitado e raciocínio médio.
@@ -75,6 +77,7 @@ O serviço `migrate` aplica as migrações antes de iniciar a API e o worker.
 - `DEEPSEEK_API_KEY`: chave central, usada apenas no servidor.
 - `TRELLO_API_KEY` e `TRELLO_CALLBACK_URL`: autorização delegada do Trello.
 - `AI_CONFIDENCE_THRESHOLD`: padrão `0.70`.
+- `MEMORY_CONFIDENCE_THRESHOLD`: padrão `0.60`; controla notas e observações sem reduzir a segurança das tarefas.
 - `RUN_LIVE_AI_TESTS`: habilita testes reais e cobrados somente quando definido como `1`.
 
 O modelo é fixado em `deepseek-v4-flash`, com `thinking.type=enabled`, `reasoning_effort=medium` e sem `temperature`.

@@ -1,4 +1,4 @@
-import { DEFAULT_AI_CONFIDENCE_THRESHOLD } from "./constants.js";
+import { DEFAULT_AI_CONFIDENCE_THRESHOLD, DEFAULT_MEMORY_CONFIDENCE_THRESHOLD } from "./constants.js";
 import type { AiCommitment, AiContext, AiDecision, AiMemory, AiTask } from "./schemas.js";
 
 export type TaskDisposition = "execute" | "review" | "propose" | "ignore";
@@ -182,12 +182,13 @@ export function buildAiExecutionPlan(
   decision: AiDecision,
   confidenceThreshold = DEFAULT_AI_CONFIDENCE_THRESHOLD,
   context?: AiContext,
+  memoryConfidenceThreshold = DEFAULT_MEMORY_CONFIDENCE_THRESHOLD,
 ): AiExecutionPlan {
   return {
     tasks: decision.tasks.map((task) => classifyTask(task, confidenceThreshold, context)),
     acceptedMemories: decision.memories.filter(
       (memory) =>
-        memory.operation === "upsert" && memory.confidence >= confidenceThreshold,
+        memory.operation === "upsert" && memory.confidence >= memoryConfidenceThreshold,
     ),
     replyShouldNotifySelf:
       decision.reply.needed && decision.reply.confidence >= confidenceThreshold,

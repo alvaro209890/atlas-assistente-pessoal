@@ -238,6 +238,7 @@ export async function registerHandlers(dependencies: HandlerDependencies): Promi
           effectiveDecision,
           config.AI_CONFIDENCE_THRESHOLD,
           context,
+          config.MEMORY_CONFIDENCE_THRESHOLD,
         );
         await repository.upsertMemories(payload.userId, plan.acceptedMemories);
         await repository.persistDecisionArtifacts(payload.userId, effectiveDecision, payload.batchKey, context);
@@ -313,51 +314,12 @@ export async function registerHandlers(dependencies: HandlerDependencies): Promi
           continue;
         }
         if (!hasScheduledRetry(error, payload.attempt)) {
-          const originalText = payload.messages.map((message) => message.text).join("\n");
-          const fallbackTask: AiTask = {
-            clientRef: "ai-pending-fallback",
-            operation: "create",
-            authorization: "inferred",
-            authorizationMessageId: null,
-            canonicalTaskId: null,
-            candidateCardId: null,
-            mergeSourceCardIds: [],
-            title: `IA pendente — ${originalText.slice(0, 120) || "mensagem do WhatsApp"}`,
-            description:
-              `A análise inteligente ficou pendente e será tentada novamente.\n\nMensagem original:\n${originalText.slice(0, 7_000)}`,
-            priority: "normal",
-            targetListRole: "inbox",
-            nextAction: "Reprocessar com a IA",
-            waitingOn: "DeepSeek",
-            risk: "unknown",
-            checklist: [],
-            dueAt: null,
-            dueBasis: "none",
-            labels: ["IA pendente"],
-            labelsToRemove: [],
-            memberIdsToAdd: [],
-            memberIdsToRemove: [],
-            project: null,
-            person: null,
-            estimateMinutes: null,
-            recurrence: null,
-            confidence: 1,
-            evidenceMessageIds: payload.messages.map((message) => message.id),
-            missingInformation: [],
-          };
-          if (payload.fallbackCanonicalTaskId) {
-            fallbackTask.canonicalTaskId = payload.fallbackCanonicalTaskId;
-          }
-          const fallbackCanonical = await repository.prepareCanonicalTask(payload.userId, fallbackTask);
-          fallbackTask.canonicalTaskId = fallbackCanonical.taskId;
-          await boss.send(QUEUES.trello, {
-            userId: payload.userId,
-            batchKey: payload.batchKey,
-            task: fallbackTask,
-            allowedCandidateCardIds: [],
-            allowedMemberIds: [],
-            attempt: 0,
-          } satisfies TrelloTaskJob);
+          await repository.createPendingAnalysisNote(
+            payload.userId,
+            payload.batchKey,
+            payload.messages,
+            error,
+          );
           if ((payload.enrichmentCycles ?? 0) < 4) {
             await boss.sendAfter(
               QUEUES.analyze,
@@ -366,7 +328,7 @@ export async function registerHandlers(dependencies: HandlerDependencies): Promi
                 attempt: 0,
                 immediateRepairAttempt: false,
                 enrichmentCycles: (payload.enrichmentCycles ?? 0) + 1,
-                fallbackCanonicalTaskId: fallbackCanonical.taskId,
+                fallbackCanonicalTaskId: payload.fallbackCanonicalTaskId,
               },
               null,
               15 * 60,

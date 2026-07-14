@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type { Database } from "@atlas/database";
 import {
@@ -1100,7 +1100,17 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
       const nodeIds = new Map<string, string>();
       for (const memory of memories) {
         if (memory.operation !== "upsert" || !memory.generatedContent) continue;
-        const sourceId = `${memory.nodeType}:${memory.title.toLocaleLowerCase("pt-BR")}`;
+        const durableEntity = ["person", "project", "group", "entity"].includes(memory.nodeType);
+        const evidenceKey = createHash("sha256")
+          .update(`${memory.generatedContent}\u001f${[...memory.sourceMessageIds].sort().join("\u001f")}`)
+          .digest("hex")
+          .slice(0, 24);
+        // Entidades duráveis devem ser atualizadas pelo nome; observações e
+        // decisões precisam permanecer distintas mesmo quando possuem títulos
+        // semelhantes (por exemplo, "Atualização").
+        const sourceId = durableEntity
+          ? `${memory.nodeType}:${memory.title.toLocaleLowerCase("pt-BR")}`
+          : `${memory.nodeType}:${evidenceKey}`;
         const result = await client.query<IdRow>(
           `INSERT INTO brain_nodes
              (user_id, type, domain, title, generated_content, aliases, tags,
@@ -1125,7 +1135,7 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
           ],
         );
         const nodeId = result.rows[0]!.id;
-        nodeIds.set(`${memory.nodeType}:${memory.title.toLocaleLowerCase("pt-BR")}`, nodeId);
+        nodeIds.set(sourceId, nodeId);
         for (const messageId of memory.sourceMessageIds) {
           await client.query(
             `INSERT INTO brain_node_sources
@@ -1150,15 +1160,25 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
         changed += 1;
       }
       for (const memory of memories) {
-        const fromId = nodeIds.get(`${memory.nodeType}:${memory.title.toLocaleLowerCase("pt-BR")}`);
+        const durableEntity = ["person", "project", "group", "entity"].includes(memory.nodeType);
+        const evidenceKey = createHash("sha256")
+          .update(`${memory.generatedContent ?? ""}\u001f${[...memory.sourceMessageIds].sort().join("\u001f")}`)
+          .digest("hex")
+          .slice(0, 24);
+        const sourceId = durableEntity
+          ? `${memory.nodeType}:${memory.title.toLocaleLowerCase("pt-BR")}`
+          : `${memory.nodeType}:${evidenceKey}`;
+        const fromId = nodeIds.get(sourceId);
         if (!fromId) continue;
         for (const relation of memory.relations) {
           const target = await client.query<IdRow>(
             `SELECT id FROM brain_nodes WHERE user_id = $1 AND type = $2
-             AND lower(title) = lower($3) LIMIT 1`,
+             AND lower(title) = lower($3) LIMIT 2`,
             [userId, relation.targetNodeType, relation.targetTitle],
           );
-          const targetId = target.rows[0]?.id;
+          // Em caso de título ambíguo, é melhor não ligar nada do que criar um
+          // backlink incorreto e difícil de desfazer.
+          const targetId = target.rows.length === 1 ? target.rows[0]?.id : undefined;
           if (!targetId || targetId === fromId) continue;
           await client.query(
             `INSERT INTO brain_edges
@@ -1174,6 +1194,65 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
     if (changed > 0) {
       await this.publishEvent(userId, "brain.memory.updated", { count: changed }, "ai");
     }
+  }
+
+  async createPendingAnalysisNote(
+    userId: string,
+    batchKey: string,
+    messages: readonly NormalizedMessage[],
+    error: unknown,
+  ): Promise<void> {
+    const title = `Análise pendente — ${messages[0]?.text.slice(0, 100) || "conversa do WhatsApp"}`;
+    const sourceId = `pending-analysis:${createHash("sha256").update(batchKey).digest("hex").slice(0, 24)}`;
+    const reason = error instanceof Error ? error.message.slice(0, 600) : String(error).slice(0, 600);
+    await this.database.userTransaction(userId, async (client) => {
+      const node = await client.query<IdRow>(
+        `INSERT INTO brain_nodes
+           (user_id,type,domain,title,generated_content,status,tags,source_type,source_id,metadata)
+         VALUES ($1,'note','whatsapp',$2,$3,'inbox',ARRAY['analise-pendente'],'atlas-ai',$4,$5)
+         ON CONFLICT (user_id,source_type,source_id)
+           WHERE source_type IS NOT NULL AND source_id IS NOT NULL
+         DO UPDATE SET generated_content=EXCLUDED.generated_content,metadata=brain_nodes.metadata || EXCLUDED.metadata
+         RETURNING id`,
+        [userId, title, "A conversa foi preservada para nova análise. Nenhuma tarefa foi criada automaticamente.", sourceId,
+          JSON.stringify({ batchKey, error: reason, pendingAnalysis: true })],
+      );
+      for (const message of messages) {
+        await client.query(
+          `INSERT INTO brain_node_sources (user_id,node_id,source_kind,source_id,title,excerpt,metadata)
+           VALUES ($1,$2,'whatsapp_message',$3,$4,$5,$6)
+           ON CONFLICT (user_id,node_id,source_kind,source_id) DO NOTHING`,
+          [userId, node.rows[0]!.id, message.id, title, message.text.slice(0, 2_000),
+            JSON.stringify({ generatedBy: "atlas-ai", pendingAnalysis: true })],
+        );
+      }
+    });
+    await this.publishEvent(userId, "brain.memory.updated", { pendingAnalysis: true }, "ai");
+  }
+
+  async linkTaskKnowledge(userId: string, taskNodeId: string, evidenceMessageIds: readonly string[]): Promise<void> {
+    if (evidenceMessageIds.length === 0) return;
+    await this.database.query(
+        `INSERT INTO brain_node_sources (user_id,node_id,source_kind,source_id,title,excerpt,metadata)
+         SELECT $1,$2,'whatsapp_message',wm.external_message_id,wm.chat_jid,left(wm.body,2000),
+                jsonb_build_object('generatedBy','atlas-ai','taskEvidence',true)
+         FROM whatsapp_messages wm
+         WHERE wm.user_id=$1 AND wm.external_message_id=ANY($3::text[])
+         ON CONFLICT (user_id,node_id,source_kind,source_id) DO NOTHING`,
+        [userId, taskNodeId, [...evidenceMessageIds]],
+    );
+    await this.database.query(
+        `INSERT INTO brain_edges (user_id,from_node_id,to_node_id,relation_type,weight,provenance)
+         SELECT $1,source.node_id,$2,'context_for',0.85,'evidence'
+         FROM brain_node_sources source
+         JOIN brain_nodes node ON node.id=source.node_id AND node.user_id=source.user_id
+         WHERE source.user_id=$1 AND source.source_kind='whatsapp_message'
+           AND source.source_id=ANY($3::text[]) AND source.node_id<>$2
+           AND node.type IN ('note','decision','reference','procedure')
+         ON CONFLICT (user_id,from_node_id,to_node_id,relation_type)
+         DO UPDATE SET weight=GREATEST(brain_edges.weight,EXCLUDED.weight),provenance='evidence'`,
+        [userId, taskNodeId, [...evidenceMessageIds]],
+    );
   }
 
   async recipientJid(userId: string): Promise<string> {
@@ -2812,6 +2891,7 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
         }),
       ],
     );
+    await this.linkTaskKnowledge(userId, result.rows[0]!.id, task.evidenceMessageIds);
     await this.publishEvent(
       userId,
       "trello.task.applied",

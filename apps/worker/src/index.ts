@@ -88,12 +88,11 @@ async function main(): Promise<void> {
         ...event.message,
         userId: event.userId,
       });
-      if (message.fromMe && !message.text.toLocaleLowerCase("pt-BR").startsWith("trello:")) {
+      if (message.fromMe) {
         const selfChat = await repository.isSelfChat(message.userId, message.chatJid);
         if (selfChat) {
           const command = parseAtlasSelfCommand(message.text);
-          if (!command) return;
-          if (await repository.persistMessage(message)) {
+          if (command && await repository.persistMessage(message)) {
             const handling = await repository.handleSelfCommand(message.userId, command, message.id);
             if (handling.task) {
               await boss.send(QUEUES.trello, {
@@ -112,8 +111,10 @@ async function main(): Promise<void> {
               );
               await boss.send(QUEUES.notification, { outboxId, attempt: 0 } satisfies NotificationJob);
             }
+            return;
           }
-          return;
+          // Texto livre no chat próprio é uma ótima forma de capturar notas,
+          // decisões e observações. Ele segue para o fluxo normal abaixo.
         }
         // fromMe numa conversa monitorada (não self): NÃO descarta. Persiste e
         // manda ao batch para a IA ver os DOIS lados da conversa — contexto real

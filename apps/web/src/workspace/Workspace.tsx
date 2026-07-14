@@ -329,6 +329,14 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
     } catch (error) { setToast(error instanceof Error ? error.message : 'Não foi possível atualizar o aprendizado.'); }
   }, [api]);
 
+  const teachAtlas = useCallback(async (input: { statement: string; title?: string }) => {
+    try {
+      const learning = await api.teachAtlas(input);
+      setData((current) => current ? { ...current, learnings: [learning, ...(current.learnings ?? [])] } : current);
+      setToast('Atlas aprendeu e vinculou uma nota ao Segundo Cérebro');
+    } catch (error) { setToast(error instanceof Error ? error.message : 'Não foi possível ensinar ao Atlas.'); }
+  }, [api]);
+
   const replanDay = useCallback(async () => {
     try {
       const result = await api.askAi({ message: 'Replaneje meu dia com até três prioridades, considerando prazos, compromissos e tempo disponível.', context: { view: 'today' } });
@@ -434,6 +442,7 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
                  onTaskAction={(id, input) => void runTaskAction(id, input)}
                  onCommitmentAction={(id, input) => void runCommitmentAction(id, input)}
                  onLearningAction={(id, action, statement) => void actOnLearning(id, action, statement)}
+                 onTeachAtlas={(input) => void teachAtlas(input)}
                  onLoadLearningEvidence={(id) => api.listLearningEvidence(id)}
                  onReplan={() => void replanDay()}
                  onCreateAutomation={(input) => void createAutomation(input)}

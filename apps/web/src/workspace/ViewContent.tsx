@@ -67,6 +67,7 @@ interface ViewContentProps {
   onTaskAction(id: string, input: { action: TaskAction; targetTaskId?: string; snoozeUntil?: string; dueAt?: string; comment?: string }): void;
   onCommitmentAction(id: string, input: { status?: 'open' | 'waiting' | 'fulfilled' | 'cancelled'; dueAt?: string | null; nextFollowUpAt?: string | null }): void;
   onLearningAction(id: string, action: LearningAction, statement?: string): void;
+  onTeachAtlas(input: { statement: string; title?: string }): void;
   onLoadLearningEvidence(id: string): Promise<LearningEvidence[]>;
   onReplan(): void;
   onCreateAutomation(input: { kind: 'briefing' | 'deadline' | 'overdue' | 'follow_up' | 'stale_task' | 'weekly_review'; time?: string }): void;
@@ -102,7 +103,7 @@ export function ViewContent(props: ViewContentProps) {
       {props.activeView === 'projects' && <ProjectsView data={props.data} />}
       {props.activeView === 'people' && <PeopleView data={props.data} />}
       {props.activeView === 'trello' && <TrelloView data={props.data} filtersOpen={trelloFiltersOpen} onCreateTask={props.onCreateTask} onOpenTask={props.onOpenTask} onTaskAction={props.onTaskAction} />}
-      {props.activeView === 'learnings' && <LearningsView learnings={props.data.learnings ?? []} onAction={props.onLearningAction} onLoadEvidence={props.onLoadLearningEvidence} />}
+      {props.activeView === 'learnings' && <LearningsView learnings={props.data.learnings ?? []} onAction={props.onLearningAction} onTeach={props.onTeachAtlas} onLoadEvidence={props.onLoadLearningEvidence} />}
       {props.activeView === 'automations' && <AutomationsView data={props.data} onToggle={props.onToggleAutomation} onCreate={props.onCreateAutomation} />}
       {props.activeView === 'settings' && <SettingsView {...props} />}
     </div>

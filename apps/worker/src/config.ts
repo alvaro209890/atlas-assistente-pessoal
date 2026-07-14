@@ -7,6 +7,7 @@ const configSchema = z.object({
   DEEPSEEK_MODEL: z.literal("deepseek-v4-flash").default("deepseek-v4-flash"),
   TRELLO_APP_KEY: z.string().default(""),
   AI_CONFIDENCE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.7),
+  MEMORY_CONFIDENCE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.6),
   BATCH_QUIET_SECONDS: z.coerce.number().int().min(1).max(60).default(10),
   BATCH_MAX_SECONDS: z.coerce.number().int().min(10).max(120).default(30),
   SESSION_WATCH_INTERVAL_SECONDS: z.coerce.number().int().min(5).max(300).default(15),

@@ -164,6 +164,8 @@ REGRAS OBRIGATÓRIAS:
 - fulfill e cancel inferidos usam authorization=inferred e viram proposta. Só use explicit_user_command com authorizationMessageId quando o dono da conta escreveu o comando no chat próprio.
 - Crie lembretes somente com horário determinável, usando timezone e current_datetime para datas relativas.
 - Instruções explícitas podem virar learning com explicitInstruction=true. Preferências inferidas devem ser low risk e nunca ganham autoridade destrutiva.
+- Não reduza a conversa a tarefas: fatos úteis, decisões, observações, riscos, mudanças de status e contexto que ajudem o usuário no futuro devem virar memories com nodeType note ou decision, mesmo sem tarefa. Use tags descritivas como observacao, fato, status, risco ou preferencia. Conversa social sem valor futuro fica em memories=[].
+- Uma tarefa só é criada quando há uma responsabilidade ou ação concreta do dono. Nunca use uma falha de análise como motivo para criar tarefa.
 - Use active_learnings apenas quando o escopo combinar com esta conversa, pessoa ou projeto.
 - conversation_groups contém somente os grupos permitidos para esta conversa. Só retorne conversationClassification quando classification_state.eligible=true, houver evidência suficiente e groupId repetir exatamente um ID permitido.
 - Nunca classifique uma conversa fora do contexto atual. Se a conversa não estiver autorizada, a origem for manual, a evidência for insuficiente ou nenhum grupo servir, use conversationClassification=null.

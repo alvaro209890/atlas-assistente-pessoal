@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { PoolClient } from '@atlas/database';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -830,6 +831,66 @@ export async function registerAssistantRoutes(app: FastifyInstance, deps: Assist
     );
     await events.publish(user.id, 'commitment.updated', { commitmentId: id, status: input.status ?? null });
     return result.rows[0];
+  });
+
+  app.post('/assistant/teach', async (request, reply) => {
+    const user = currentUser(request);
+    const input = parseInput(z.object({
+      statement: z.string().trim().min(3).max(10_000),
+      title: z.string().trim().min(3).max(300).optional(),
+    }), request.body);
+    const result = await database.userTransaction(user.id, async (client) => {
+      const learningKey = `teach:${createHash('sha256').update(input.statement.normalize('NFKC').toLocaleLowerCase('pt-BR')).digest('hex')}`;
+      const learning = await client.query<{
+        id: string; scopeType: string; scopeId: string | null; learningKey: string; statement: string;
+        sourceType: string; status: string; confidence: string | number; evidenceCount: number;
+        distinctEvidenceDays: number; requiresConfirmation: boolean; activatedAt: Date | null;
+        reviewAfter: Date | null; version: number; metadata: Record<string, unknown>; createdAt: Date; updatedAt: Date;
+      }>(`INSERT INTO assistant_learnings
+          (user_id,scope_type,learning_key,statement,source_type,state,confidence,requires_confirmation,activated_at,metadata)
+         VALUES ($1,'global',$2,$3,'explicit','active',1,false,now(),'{"risk":"low","taught":true}'::jsonb)
+         ON CONFLICT (user_id,scope_type,scope_id,learning_key,version)
+         DO UPDATE SET statement=EXCLUDED.statement,state='active',confidence=1,requires_confirmation=false,
+           activated_at=COALESCE(assistant_learnings.activated_at,now()),updated_at=now()
+         RETURNING id,scope_type AS "scopeType",scope_id AS "scopeId",learning_key AS "learningKey",
+           statement,source_type AS "sourceType",state AS status,confidence,evidence_count AS "evidenceCount",
+           distinct_evidence_days AS "distinctEvidenceDays",requires_confirmation AS "requiresConfirmation",
+           activated_at AS "activatedAt",review_after AS "reviewAfter",version,metadata,
+           created_at AS "createdAt",updated_at AS "updatedAt"`, [user.id, learningKey, input.statement]);
+      const item = learning.rows[0]!;
+      const node = await client.query<{ id: string; title: string; updated_at: Date }>(
+        `INSERT INTO brain_nodes
+          (user_id,type,domain,title,manual_content,tags,source_type,source_id,metadata)
+         VALUES ($1,'note','personal',$2,$3,ARRAY['aprendizado','memoria','preferencia'],'assistant_learning',$4,$5)
+         ON CONFLICT (user_id,source_type,source_id)
+           WHERE source_type IS NOT NULL AND source_id IS NOT NULL
+         DO UPDATE SET title=EXCLUDED.title,manual_content=EXCLUDED.manual_content,updated_at=now()
+         RETURNING id,title,updated_at`,
+        [user.id, input.title ?? input.statement.slice(0, 120), input.statement, item.id,
+          JSON.stringify({ learningId: item.id, taught: true })],
+      );
+      await client.query(
+        `INSERT INTO brain_node_sources (user_id,node_id,source_kind,source_id,title,excerpt,metadata)
+         VALUES ($1,$2,'manual',$3,$4,$5,$6)
+         ON CONFLICT (user_id,node_id,source_kind,source_id) DO UPDATE SET excerpt=EXCLUDED.excerpt`,
+        [user.id, node.rows[0]!.id, item.id, 'Ensinado por você', input.statement, JSON.stringify({ learningId: item.id })],
+      );
+      await client.query(
+        `INSERT INTO assistant_learning_evidence (user_id,learning_id,evidence_type,source_id,excerpt,signal,weight,metadata)
+         VALUES ($1,$2,'explicit_instruction',$3,$4,'confirms',1,$5)
+         ON CONFLICT (user_id,learning_id,evidence_type,source_id) DO NOTHING`,
+        [user.id, item.id, node.rows[0]!.id, input.statement, JSON.stringify({ brainNodeId: node.rows[0]!.id })],
+      );
+      await client.query(
+        `UPDATE assistant_learnings SET evidence_count=1,distinct_evidence_days=1,first_evidence_at=now(),last_evidence_at=now(),
+           metadata=metadata || $3::jsonb WHERE user_id=$1 AND id=$2`,
+        [user.id, item.id, JSON.stringify({ brainNodeId: node.rows[0]!.id })],
+      );
+      return { learning: item, memory: { id: node.rows[0]!.id, title: node.rows[0]!.title, excerpt: input.statement.slice(0, 300), source: 'manual', updatedAt: node.rows[0]!.updated_at } };
+    });
+    await events.publish(user.id, 'learning.created', { learningId: result.learning.id, source: 'teach' });
+    await events.publish(user.id, 'brain.node.created', { nodeId: result.memory.id, source: 'teach' });
+    return reply.status(201).send(result);
   });
 
   app.get('/assistant/learnings', async (request) => {

@@ -80,6 +80,7 @@ export interface AppApi {
   listLearnings(status?: string): Promise<AssistantLearning[]>;
   listLearningEvidence(id: string): Promise<LearningEvidence[]>;
   actOnLearning(id: string, input: { action: LearningAction; statement?: string }): Promise<AssistantLearning | { deleted: true }>;
+  teachAtlas(input: { statement: string; title?: string }): Promise<AssistantLearning>;
   listProposals(): Promise<ActionProposal[]>;
   actOnProposal(id: string, input: { action: ProposalAction; patch?: Record<string, unknown> }): Promise<ActionProposal>;
   updateSettings(input: { reminderTimes?: string[]; notifySelf?: boolean }): Promise<NonNullable<WorkspaceData['settings']>>;
@@ -569,6 +570,11 @@ class RealApi implements AppApi {
     return normalizeLearning(result);
   }
 
+  async teachAtlas(input: { statement: string; title?: string }) {
+    const result = await request<{ learning: ApiLearningPayload }>('/assistant/teach', { method: 'POST', body: JSON.stringify(input) });
+    return normalizeLearning(result.learning);
+  }
+
   async listProposals() {
     const proposals = unwrapItems(await request<ApiProposalPayload[] | { items: ApiProposalPayload[] }>('/assistant/proposals'));
     return proposals.map(normalizeProposal);
@@ -951,6 +957,13 @@ class PreviewApi implements AppApi {
     if (input.statement) learning.statement = input.statement;
     learning.status = input.action === 'confirm' ? 'active' : input.action === 'pause' ? 'paused' : input.action === 'reject' ? 'rejected' : learning.status;
     return clone(learning);
+  }
+
+  async teachAtlas(input: { statement: string; title?: string }) {
+    await pause(100);
+    const item: AssistantLearning = { id: `learning-${Date.now()}`, statement: input.statement, scopeType: 'global', scopeLabel: null, status: 'active', confidence: 1, evidenceCount: 1, inferred: false, lastUsedAt: null, version: 1, updatedAt: 'agora' };
+    this.workspace.learnings = [item, ...(this.workspace.learnings ?? [])];
+    return clone(item);
   }
 
   async listProposals() {
