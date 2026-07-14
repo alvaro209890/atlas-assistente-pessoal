@@ -147,6 +147,28 @@ export function createQrDataUrl(qr: string): Promise<string> {
   });
 }
 
+/**
+ * Normaliza a agenda do Baileys (sync inicial do QR, contacts.upsert/update) em
+ * pares {jid, name} prontos para nomear os chats. Prioriza o nome salvo pelo
+ * dono do número, depois o pushName público e por fim o nome verificado
+ * (contas comerciais); descarta entradas sem id ou sem nenhum nome.
+ */
+export function mapWhatsAppContactNames(
+  rawContacts: readonly { id?: unknown; name?: unknown; notify?: unknown; verifiedName?: unknown }[],
+): { jid: string; name: string }[] {
+  return rawContacts
+    .filter((c) => typeof c.id === "string" && c.id)
+    .map((c) => ({
+      jid: jidNormalizedUser(c.id as string),
+      name:
+        (typeof c.name === "string" && c.name.trim()) ||
+        (typeof c.notify === "string" && c.notify.trim()) ||
+        (typeof c.verifiedName === "string" && c.verifiedName.trim()) ||
+        "",
+    }))
+    .filter((c) => c.name);
+}
+
 export function shouldProcessWhatsAppChat(
   chatJid: string,
   selfJid: string | null,
@@ -325,8 +347,27 @@ export class BaileysSessionManager {
       }
     };
 
-    socket.ev.on("messaging-history.set", ({ chats }) => {
-      void emitConversations(chats).catch((error) => this.emitError(userId, error));
+    const emitContacts = async (
+      rawContacts: readonly { id?: unknown; name?: unknown; notify?: unknown; verifiedName?: unknown }[],
+    ) => {
+      const mapped = mapWhatsAppContactNames(rawContacts);
+      if (mapped.length > 0) {
+        await this.options.onEvent({ type: "contacts", userId, contacts: mapped });
+      }
+    };
+
+    socket.ev.on("messaging-history.set", ({ chats, contacts }) => {
+      // O sync inicial após o scan do QR traz a agenda inteira aqui (contacts).
+      // Sem isto, os nomes só chegariam via contacts.upsert (mudanças futuras),
+      // deixando os chats sem nome logo após conectar. Persistimos os chats antes
+      // de aplicar os nomes: upsertContacts só ATUALIZA linhas de catálogo já
+      // existentes, então a ordem importa (evita corrida insert/update).
+      void (async () => {
+        await emitConversations(chats);
+        if (Array.isArray(contacts) && contacts.length > 0) {
+          await emitContacts(contacts);
+        }
+      })().catch((error) => this.emitError(userId, error));
     });
     socket.ev.on("chats.upsert", (chats) => {
       void emitConversations(chats).catch((error) => this.emitError(userId, error));
@@ -334,21 +375,6 @@ export class BaileysSessionManager {
     socket.ev.on("chats.update", (chats) => {
       void emitConversations(chats).catch((error) => this.emitError(userId, error));
     });
-
-    const emitContacts = async (rawContacts: readonly { id?: unknown; name?: unknown; notify?: unknown }[]) => {
-      const mapped = rawContacts
-        .filter((c) => typeof c.id === "string" && c.id)
-        .map((c) => ({
-          jid: jidNormalizedUser(c.id as string),
-          name: (typeof c.name === "string" && (c.name as string).trim()) ||
-                (typeof c.notify === "string" && (c.notify as string).trim()) ||
-            "",
-        }))
-        .filter((c) => c.name);
-      if (mapped.length > 0) {
-        await this.options.onEvent({ type: "contacts", userId, contacts: mapped });
-      }
-    };
 
     socket.ev.on("contacts.upsert", (contacts) => {
       void emitContacts(contacts).catch((error) => this.emitError(userId, error));

@@ -4,6 +4,7 @@ import {
   createPersistentAuthenticationState,
   createQrDataUrl,
   extractTextMessageContent,
+  mapWhatsAppContactNames,
   normalizeBrazilianPhone,
   shouldProcessWhatsAppChat,
   type BaileysAuthRepository,
@@ -61,6 +62,21 @@ describe("WhatsApp integration", () => {
     expect(shouldProcessWhatsAppChat("5511999@s.whatsapp.net", "5511999:12@s.whatsapp.net", false)).toBe(true);
     expect(shouldProcessWhatsAppChat("group@g.us", "5511999@s.whatsapp.net", false)).toBe(false);
     expect(shouldProcessWhatsAppChat("selected@g.us", "5511999@s.whatsapp.net", true)).toBe(true);
+  });
+
+  it("mapeia a agenda do QR em nomes de chat (nome salvo > pushName > verificado)", () => {
+    const mapped = mapWhatsAppContactNames([
+      { id: "5566984396232@s.whatsapp.net", name: "  João Obra  ", notify: "Joãozinho" },
+      { id: "5511988887777@s.whatsapp.net", notify: "  Maria  " },
+      { id: "5511911112222@s.whatsapp.net", verifiedName: "Loja Oficial" },
+      { id: "5511900000000@s.whatsapp.net" }, // sem nome nenhum -> descartado
+      { name: "Sem id" }, // sem id -> descartado
+    ]);
+    expect(mapped).toEqual([
+      { jid: "5566984396232@s.whatsapp.net", name: "João Obra" },
+      { jid: "5511988887777@s.whatsapp.net", name: "Maria" },
+      { jid: "5511911112222@s.whatsapp.net", name: "Loja Oficial" },
+    ]);
   });
 
   it("adds Brazil country code 55 to national phone numbers and accepts Baileys JIDs", () => {
