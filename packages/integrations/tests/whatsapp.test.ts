@@ -78,10 +78,10 @@ describe("WhatsApp integration", () => {
       { id: "556684396232@s.whatsapp.net", name: "Cliente Direto" },
       { id: "216737052123240@lid", name: "Participante de grupo" },
     ]);
-    expect(mapped).toEqual([{ jid: "556684396232@s.whatsapp.net", name: "Cliente Direto" }]);
+    expect(mapped).toEqual([{ jid: "556684396232@s.whatsapp.net", name: "Cliente Direto", saved: true }]);
   });
 
-  it("mapeia a agenda do QR em nomes de chat (nome salvo > pushName > verificado)", () => {
+  it("marca saved=true só para o nome da agenda (name), não para pushName/verificado", () => {
     const mapped = mapWhatsAppContactNames([
       { id: "5566984396232@s.whatsapp.net", name: "  João Obra  ", notify: "Joãozinho" },
       { id: "5511988887777@s.whatsapp.net", notify: "  Maria  " },
@@ -90,9 +90,9 @@ describe("WhatsApp integration", () => {
       { name: "Sem id" }, // sem id -> descartado
     ]);
     expect(mapped).toEqual([
-      { jid: "5566984396232@s.whatsapp.net", name: "João Obra" },
-      { jid: "5511988887777@s.whatsapp.net", name: "Maria" },
-      { jid: "5511911112222@s.whatsapp.net", name: "Loja Oficial" },
+      { jid: "5566984396232@s.whatsapp.net", name: "João Obra", saved: true },
+      { jid: "5511988887777@s.whatsapp.net", name: "Maria", saved: false },
+      { jid: "5511911112222@s.whatsapp.net", name: "Loja Oficial", saved: false },
     ]);
   });
 

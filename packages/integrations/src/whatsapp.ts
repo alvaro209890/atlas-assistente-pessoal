@@ -37,7 +37,7 @@ export type WhatsAppSessionEvent =
   | {
       type: "contacts";
       userId: string;
-      contacts: { jid: string; name: string }[];
+      contacts: { jid: string; name: string; saved: boolean }[];
     }
   | {
       type: "text_message";
@@ -159,23 +159,29 @@ export function isMonitorableChatJid(jid: string): boolean {
 
 /**
  * Normaliza a agenda do Baileys (sync inicial do QR, contacts.upsert/update) em
- * pares {jid, name} prontos para nomear os chats. Prioriza o nome salvo pelo
- * dono do número, depois o pushName público e por fim o nome verificado
- * (contas comerciais); descarta entradas sem id, sem nome ou não-monitoráveis.
+ * pares {jid, name, saved}. `name` (agenda do dono do número) é o nome SALVO e
+ * marca `saved=true` — ele deve ter prioridade e sobrescrever o pushName. Sem
+ * nome salvo, cai no pushName (`notify`) e depois no nome verificado
+ * (`verifiedName`), com `saved=false` (só preenche quando o chat está sem nome).
+ * Descarta entradas sem id, sem nome ou não-monitoráveis.
  */
 export function mapWhatsAppContactNames(
   rawContacts: readonly { id?: unknown; name?: unknown; notify?: unknown; verifiedName?: unknown }[],
-): { jid: string; name: string }[] {
+): { jid: string; name: string; saved: boolean }[] {
   return rawContacts
     .filter((c) => typeof c.id === "string" && c.id)
-    .map((c) => ({
-      jid: jidNormalizedUser(c.id as string),
-      name:
-        (typeof c.name === "string" && c.name.trim()) ||
+    .map((c) => {
+      const savedName = typeof c.name === "string" ? c.name.trim() : "";
+      const fallbackName =
         (typeof c.notify === "string" && c.notify.trim()) ||
         (typeof c.verifiedName === "string" && c.verifiedName.trim()) ||
-        "",
-    }))
+        "";
+      return {
+        jid: jidNormalizedUser(c.id as string),
+        name: savedName || fallbackName,
+        saved: Boolean(savedName),
+      };
+    })
     .filter((c) => c.name && isMonitorableChatJid(c.jid));
 }
 
@@ -329,6 +335,17 @@ export class BaileysSessionManager {
             selfJid,
             displayName: socket.user?.name?.trim() || null,
           });
+          // Completa a sincronização da agenda (app-state) para trazer os nomes
+          // SALVOS dos contatos — o sync inicial costuma vir parcial, deixando
+          // chats só com número/pushName. Uma vez por conexão, sem bloquear.
+          setTimeout(() => {
+            void socket
+              .resyncAppState(
+                ["critical_unblock_low", "critical_block", "regular_high", "regular_low", "regular"],
+                false,
+              )
+              .catch((error) => this.emitError(userId, error));
+          }, 2_500);
         }
         if (update.connection === "close") {
           if (this.intentionalStops.delete(userId)) {

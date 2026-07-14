@@ -381,25 +381,29 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
 
   async upsertContacts(
     userId: string,
-    contacts: readonly { jid: string; name: string }[],
+    contacts: readonly { jid: string; name: string; saved?: boolean }[],
   ): Promise<void> {
     const connectionId = await this.getConnectionId(userId);
     await this.database.transaction(async (client) => {
       for (const contact of contacts) {
         if (!contact.name) continue;
+        // Nome salvo na agenda ($5=true) SOBRESCREVE o que estiver lá (o sync do
+        // chat costuma gravar o pushName ou o número). pushName/verificado
+        // ($5=false) só preenchem quando o chat ainda está sem nome.
+        const saved = contact.saved === true;
         await client.query(
           `UPDATE whatsapp_conversation_catalog
            SET display_name = $4, last_seen_at = now()
            WHERE user_id = $1 AND whatsapp_connection_id = $2 AND jid = $3
-             AND (display_name = '' OR display_name IS NULL)`,
-          [userId, connectionId, contact.jid, contact.name],
+             AND ($5::boolean OR display_name = '' OR display_name IS NULL)`,
+          [userId, connectionId, contact.jid, contact.name, saved],
         );
         await client.query(
           `UPDATE monitored_chats
            SET display_name = $4
            WHERE user_id = $1 AND whatsapp_connection_id = $2 AND jid = $3
-             AND (display_name = '' OR display_name IS NULL)`,
-          [userId, connectionId, contact.jid, contact.name],
+             AND ($5::boolean OR display_name = '' OR display_name IS NULL)`,
+          [userId, connectionId, contact.jid, contact.name, saved],
         );
       }
     });
