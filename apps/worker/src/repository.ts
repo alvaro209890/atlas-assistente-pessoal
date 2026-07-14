@@ -389,7 +389,7 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
         if (!contact.name) continue;
         await client.query(
           `UPDATE whatsapp_conversation_catalog
-           SET display_name = $4, updated_at = now()
+           SET display_name = $4, last_seen_at = now()
            WHERE user_id = $1 AND whatsapp_connection_id = $2 AND jid = $3
              AND (display_name = '' OR display_name IS NULL)`,
           [userId, connectionId, contact.jid, contact.name],
