@@ -193,6 +193,80 @@ type DeepSeekUsage = {
   prompt_cache_miss_tokens?: number;
 };
 
+function normalizedToken(value: unknown): string {
+  return typeof value === "string"
+    ? value.normalize("NFD").replace(/\p{Diacritic}/gu, "").trim().toLocaleLowerCase("pt-BR")
+    : "";
+}
+
+/**
+ * O provedor ocasionalmente usa rótulos semânticos em português (por exemplo,
+ * "observação") apesar do contrato pedir enums técnicos em inglês. Estes
+ * aliases não concedem novas permissões: convertem conhecimento para `note`
+ * e valores desconhecidos para os defaults seguros do schema.
+ */
+export function normalizeDeepSeekDecision(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const decision = { ...(value as Record<string, unknown>) };
+  const asArray = (input: unknown): Record<string, unknown>[] => Array.isArray(input)
+    ? input.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+    : [];
+  const memories = asArray(decision.memories);
+  // Alguns modelos confundem o formato de memory com o de learning. Quando a
+  // estrutura é inequivocamente uma nota, ela é preservada no destino seguro.
+  const rawLearnings = asArray(decision.learnings);
+  for (const learning of rawLearnings) {
+    if (typeof learning.operation === "string" && typeof learning.title === "string" && Array.isArray(learning.sourceMessageIds)) {
+      memories.push(learning);
+    }
+  }
+  decision.memories = memories;
+  decision.learnings = rawLearnings.filter((learning) =>
+    typeof learning.clientRef === "string"
+    && typeof learning.statement === "string"
+    && typeof learning.scope === "string"
+    && Array.isArray(learning.evidenceMessageIds),
+  );
+  decision.tasks = asArray(decision.tasks).filter((task) =>
+    typeof task.clientRef === "string" && typeof task.title === "string" && Array.isArray(task.evidenceMessageIds),
+  );
+  decision.reminders = asArray(decision.reminders).filter((item) =>
+    typeof item.clientRef === "string" && typeof item.title === "string" && Array.isArray(item.evidenceMessageIds),
+  );
+  decision.commitments = asArray(decision.commitments).filter((item) =>
+    typeof item.clientRef === "string" && typeof item.title === "string" && Array.isArray(item.evidenceMessageIds),
+  );
+  decision.actionProposals = asArray(decision.actionProposals).filter((item) =>
+    typeof item.clientRef === "string" && typeof item.title === "string" && Array.isArray(item.evidenceMessageIds),
+  );
+  if (typeof decision.conversationSummary !== "string" || !decision.conversationSummary.trim()) decision.conversationSummary = "Conversa analisada pelo Atlas.";
+  if (typeof decision.briefReason !== "string" || !decision.briefReason.trim()) decision.briefReason = "Saída da IA normalizada com segurança.";
+  const intentAliases: Record<string, string> = {
+    acao: "actionable", tarefa: "actionable", followup: "follow_up", acompanhamento: "follow_up",
+    pergunta: "question", duvida: "question", atualizacao: "status_update", status: "status_update",
+    informacao: "informational", informativo: "informational", social: "social", conversa: "social",
+  };
+  const intent = normalizedToken(decision.conversationIntent);
+  if (intentAliases[intent]) decision.conversationIntent = intentAliases[intent];
+  else if (intent && !["actionable", "follow_up", "question", "status_update", "informational", "social", "unknown"].includes(intent)) decision.conversationIntent = "unknown";
+  if (Array.isArray(decision.memories)) {
+    const nodeAliases: Record<string, string> = {
+      observacao: "note", observation: "note", fato: "note", fato_util: "note", fact: "note",
+      preferencia: "note", preference: "note", contexto: "note", status: "note",
+      decisao: "decision", decision: "decision", procedimento: "procedure", procedure: "procedure",
+      referencia: "reference", reference: "reference", pessoa: "person", projeto: "project", grupo: "group",
+    };
+    decision.memories = decision.memories.map((memory) => {
+      if (!memory || typeof memory !== "object" || Array.isArray(memory)) return memory;
+      const item = { ...(memory as Record<string, unknown>) };
+      const type = normalizedToken(item.nodeType);
+      if (nodeAliases[type]) item.nodeType = nodeAliases[type];
+      return item;
+    });
+  }
+  return decision;
+}
+
 export class DeepSeekDecisionClient {
   private readonly client: OpenAI;
   private readonly model: string;
@@ -248,7 +322,7 @@ export class DeepSeekDecisionClient {
       throw new InvalidAiOutputError("DeepSeek returned invalid JSON", { cause: error });
     }
 
-    const parsed = aiDecisionSchema.safeParse(decoded);
+    const parsed = aiDecisionSchema.safeParse(normalizeDeepSeekDecision(decoded));
     if (!parsed.success) {
       throw new InvalidAiOutputError(`DeepSeek JSON failed schema validation: ${parsed.error.message}`);
     }

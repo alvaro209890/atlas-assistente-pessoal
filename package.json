@@ -28,6 +28,7 @@
     "release:check": "npm run check && npm run verify:release",
     "db:migrate": "npm run migrate -w @atlas/database",
     "db:seed": "npm run seed -w @atlas/database"
+    ,"ai:replay-notes": "node scripts/replay-whatsapp-notes.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

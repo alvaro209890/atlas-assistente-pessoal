@@ -23,9 +23,20 @@ IA é ignorada para evitar um vínculo incorreto.
 ## Backfill do usuário
 
 Use primeiro um replay em modo seco para produzir relatório sem escrita ou
-efeito externo. O modo de aplicação aprovado para dados históricos grava apenas
-notas, fontes e vínculos; ele nunca cria cartões, tarefas, lembretes ou envia
-mensagens. Antes do backfill, faça backup e aplique as migrações pendentes.
+efeito externo:
+
+```bash
+npm run ai:replay-notes -- --user "nome"
+```
+
+Depois, `--apply` grava apenas notas e fontes; ele nunca cria cartões, tarefas,
+lembretes ou envia mensagens:
+
+```bash
+npm run ai:replay-notes -- --user "nome" --apply
+```
+
+Antes do backfill, faça backup e aplique as migrações pendentes.
 
 ## Ensino explícito
 
