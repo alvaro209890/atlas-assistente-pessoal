@@ -50,6 +50,11 @@ export type WhatsAppSessionEvent =
         sentAt: string;
         fromMe: boolean;
         text: string;
+        isGroup: boolean;
+        mentionedJids: string[];
+        quotedParticipantJid: string | null;
+        quotedMessageId: string | null;
+        directedToUser: boolean;
       };
     };
 
@@ -139,6 +144,28 @@ export function extractTextMessageContent(
   return normalized ? normalized : null;
 }
 
+function extractMessageContextInfo(message: proto.IMessage | null | undefined): proto.IContextInfo | null {
+  if (!message) return null;
+  return message.extendedTextMessage?.contextInfo
+    ?? message.imageMessage?.contextInfo
+    ?? message.videoMessage?.contextInfo
+    ?? message.documentMessage?.contextInfo
+    ?? null;
+}
+
+export function isWhatsAppMessageDirectedToUser(input: {
+  isGroup: boolean;
+  fromMe: boolean;
+  mentionedJids: readonly string[];
+  quotedParticipantJid: string | null;
+  selfJids: readonly string[];
+}): boolean {
+  if (!input.isGroup || input.fromMe) return true;
+  const self = new Set(input.selfJids.filter(Boolean).map((jid) => jidNormalizedUser(jid)));
+  if (input.mentionedJids.some((jid) => self.has(jidNormalizedUser(jid)))) return true;
+  return input.quotedParticipantJid !== null && self.has(jidNormalizedUser(input.quotedParticipantJid));
+}
+
 export function createQrDataUrl(qr: string): Promise<string> {
   return QRCode.toDataURL(qr, {
     type: "image/png",
@@ -220,6 +247,21 @@ function mapConversationCatalog(items: readonly unknown[]): WhatsAppConversation
     });
   }
   return mapped;
+}
+
+export function mapContactCatalog(
+  rawContacts: readonly { id?: unknown; name?: unknown; notify?: unknown }[],
+): { jid: string; name: string }[] {
+  return rawContacts
+    .filter((contact) => typeof contact.id === "string" && contact.id)
+    .map((contact) => ({
+      jid: jidNormalizedUser(contact.id as string),
+      name:
+        (typeof contact.name === "string" && contact.name.trim()) ||
+        (typeof contact.notify === "string" && contact.notify.trim()) ||
+        "",
+    }))
+    .filter((contact) => contact.name);
 }
 
 function unixTimestampToIso(timestamp: unknown): string {
@@ -311,7 +353,9 @@ export class BaileysSessionManager {
       logger: this.logger,
       printQRInTerminal: false,
       markOnlineOnConnect: false,
-      syncFullHistory: false,
+      // Names and subjects arrive in the initial history snapshot. Message bodies are
+      // still filtered by the selected-chat allow-list before leaving this adapter.
+      syncFullHistory: true,
       generateHighQualityLinkPreview: false,
     });
     this.sockets.set(userId, socket);
@@ -425,6 +469,23 @@ export class BaileysSessionManager {
           if (!text) continue;
           const senderJid = jidNormalizedUser(item.key.participant ?? chatJid);
           if (!senderJid) continue;
+          const isGroup = chatJid.endsWith("@g.us");
+          const contextInfo = extractMessageContextInfo(item.message);
+          const mentionedJids = [...new Set(
+            (contextInfo?.mentionedJid ?? [])
+              .filter((jid): jid is string => typeof jid === "string" && jid.length > 0)
+              .map((jid) => jidNormalizedUser(jid)),
+          )];
+          const quotedParticipantJid = typeof contextInfo?.participant === "string" && contextInfo.participant
+            ? jidNormalizedUser(contextInfo.participant)
+            : null;
+          const quotedMessageId = typeof contextInfo?.stanzaId === "string" && contextInfo.stanzaId
+            ? contextInfo.stanzaId
+            : null;
+          const socketIdentity = socket.user as (typeof socket.user & { lid?: string | null }) | undefined;
+          const selfJids = [socketIdentity?.id, socketIdentity?.lid]
+            .filter((jid): jid is string => typeof jid === "string" && jid.length > 0)
+            .map((jid) => jidNormalizedUser(jid));
           await this.options.onEvent({
             type: "text_message",
             userId,
@@ -436,6 +497,17 @@ export class BaileysSessionManager {
               sentAt: unixTimestampToIso(item.messageTimestamp),
               fromMe: item.key.fromMe === true,
               text,
+              isGroup,
+              mentionedJids,
+              quotedParticipantJid,
+              quotedMessageId,
+              directedToUser: isWhatsAppMessageDirectedToUser({
+                isGroup,
+                fromMe: item.key.fromMe === true,
+                mentionedJids,
+                quotedParticipantJid,
+                selfJids,
+              }),
             },
           });
         }

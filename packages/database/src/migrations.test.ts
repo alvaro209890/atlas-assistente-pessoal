@@ -24,6 +24,7 @@ describe('database migrations', () => {
       'job_attempts', 'idempotency_keys', 'notification_outbox',
       'trello_cards', 'trello_card_node_map',
       'whatsapp_auth_records', 'whatsapp_conversation_catalog',
+      'whatsapp_contact_catalog', 'conversation_groups',
       'user_profiles', 'canonical_tasks', 'task_events', 'task_trello_links',
       'reminders', 'reminder_occurrences', 'commitments', 'assistant_learnings',
       'assistant_learning_evidence', 'assistant_action_outcomes', 'brain_node_sources',

@@ -338,9 +338,23 @@ export async function registerPlatformRoutes(app: FastifyInstance, deps: Platfor
         `SELECT id::text,event_type,payload,created_at,topic FROM event_outbox
          WHERE user_id=$1 ORDER BY id DESC LIMIT 20`, [user.id],
       ),
-      database.query<{ id: string; title: string; list_name: string; due_at: Date | string | null; labels: unknown }>(
-        `SELECT id,title,list_name,due_at,labels FROM trello_cards
-         WHERE user_id=$1 AND closed=false ORDER BY due_at NULLS LAST,updated_at DESC LIMIT 100`, [user.id],
+      database.query<{
+        id: string; external_id: string; task_id: string | null; title: string; list_name: string;
+        list_role: 'inbox' | 'inProgress' | 'paused' | 'completed' | null;
+        url: string | null; due_at: Date | string | null; labels: unknown;
+      }>(
+        `SELECT card.id,card.trello_card_id AS external_id,link.task_id::text,card.title,card.list_name,card.url,
+                CASE WHEN card.list_id=board.inbox_list_id THEN 'inbox'
+                     WHEN card.list_id=board.in_progress_list_id THEN 'inProgress'
+                     WHEN card.list_id=board.paused_list_id THEN 'paused'
+                     WHEN card.list_id=board.done_list_id THEN 'completed'
+                     ELSE NULL END AS list_role,
+                card.due_at,card.labels
+         FROM trello_cards card
+         LEFT JOIN task_trello_links link ON link.user_id=card.user_id AND link.trello_card_id=card.id
+         LEFT JOIN trello_board_configs board ON board.user_id=card.user_id AND board.id=card.trello_board_config_id
+         WHERE card.user_id=$1 AND card.closed=false
+         ORDER BY card.due_at NULLS LAST,card.updated_at DESC LIMIT 100`, [user.id],
       ),
       database.query<{
         id: string; name: string; kind: string; enabled: boolean; last_run_at: Date | string | null;
@@ -487,7 +501,8 @@ export async function registerPlatformRoutes(app: FastifyInstance, deps: Platfor
         accent: String(row.metadata.accent ?? '#26a69a'),
       })),
       trelloCards: cards.rows.map((row) => ({
-        id: row.id, title: row.title, list: row.list_name,
+        id: row.id, externalId: row.external_id, taskId: row.task_id, title: row.title, list: row.list_name,
+        listRole: row.list_role, url: row.url,
         due: row.due_at ? new Date(row.due_at).toISOString() : null,
         labels: normalizeTrelloLabels(row.labels),
       })),

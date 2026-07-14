@@ -1,4 +1,4 @@
-import type { Chat, Note, OnboardingStatus, Session, WorkspaceData } from './types';
+import type { Chat, ChatGroup, Note, OnboardingStatus, Session, WorkspaceData } from './types';
 
 export const demoSession: Session = {
   user: {
@@ -45,11 +45,18 @@ export const demoOnboarding: OnboardingStatus = {
   selectedChatIds: [],
 };
 
+export const demoChatGroups: ChatGroup[] = [
+  { id: 'group-work', name: 'Trabalho', description: 'Clientes, equipe e projetos.', color: '#7C5CFF', system: true, chatCount: 2, monitoredCount: 2 },
+  { id: 'group-study', name: 'Estudos', description: 'Cursos e aprendizado.', color: '#3B82F6', system: true, chatCount: 0, monitoredCount: 0 },
+  { id: 'group-relationships', name: 'Relacionamentos', description: 'Vida afetiva.', color: '#EC4899', system: true, chatCount: 0, monitoredCount: 0 },
+  { id: 'group-friends', name: 'Amigos', description: 'Amizades e vida social.', color: '#10B981', system: true, chatCount: 1, monitoredCount: 0 },
+];
+
 export const demoChats: Chat[] = [
-  { id: 'chat-1', name: 'Eu mesmo', kind: 'direct', lastMessageAt: 'agora', selected: true },
-  { id: 'chat-2', name: 'Equipe Produto', kind: 'group', lastMessageAt: 'há 12 min' },
-  { id: 'chat-3', name: 'Lucas Mendes', kind: 'direct', lastMessageAt: 'ontem' },
-  { id: 'chat-4', name: 'Projeto Aurora', kind: 'group', lastMessageAt: 'sexta-feira' },
+  { id: 'chat-1', name: 'Eu mesmo', kind: 'direct', lastMessageAt: 'agora', selected: true, group: null, classification: { source: null, confidence: null, reason: null, updatedAt: null } },
+  { id: 'chat-2', name: 'Equipe Produto', kind: 'group', lastMessageAt: 'há 12 min', selected: true, group: { id: 'group-work', name: 'Trabalho', color: '#7C5CFF' }, classification: { source: 'manual', confidence: null, reason: null, updatedAt: null } },
+  { id: 'chat-3', name: 'Lucas Mendes', kind: 'direct', lastMessageAt: 'ontem', selected: true, group: { id: 'group-work', name: 'Trabalho', color: '#7C5CFF' }, classification: { source: 'ai', confidence: .91, reason: 'Assuntos recorrentes de produto e entregas.', updatedAt: '2026-07-14T12:00:00.000Z' } },
+  { id: 'chat-4', name: 'Projeto Aurora', kind: 'group', lastMessageAt: 'sexta-feira', selected: false, group: { id: 'group-friends', name: 'Amigos', color: '#10B981' }, classification: { source: 'manual', confidence: null, reason: null, updatedAt: null } },
 ];
 
 export const demoNotes: Record<string, Note> = {
@@ -151,7 +158,7 @@ export const demoWorkspace: WorkspaceData = {
     { id: 'person-3', name: 'Rafael Lima', role: 'Operações', initials: 'RL', lastContext: 'Automação do resumo diário', noteCount: 6, accent: '#6fcfbd' },
   ],
   trelloCards: [
-    { id: 'card-1', title: 'Revisar apresentação final', list: 'Em andamento', due: 'Hoje, 14:00', labels: ['Aurora', 'Prioridade'] },
+    { id: 'card-1', externalId: 'card-1', taskId: 'focus-1', title: 'Revisar apresentação final', list: 'Em andamento', listRole: 'inProgress', url: 'https://trello.com/c/preview', due: 'Hoje, 14:00', labels: ['Aurora', 'Prioridade'] },
     { id: 'card-2', title: 'Definir cópia do onboarding', list: 'A fazer', due: 'Amanhã', labels: ['Produto'] },
     { id: 'card-3', title: 'Automatizar resumo diário', list: 'Em revisão', due: '16 jul', labels: ['Operações', 'Automação'] },
     { id: 'card-4', title: 'Organizar referências de marca', list: 'A fazer', due: null, labels: ['Marca'] },

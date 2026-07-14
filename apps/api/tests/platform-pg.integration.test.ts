@@ -602,6 +602,55 @@ describeWithPostgres('platform API with PostgreSQL', () => {
       .toMatchObject({ step: 7, totalSteps: 7, profile: { preferredName: 'Ana', workDays: [1, 2, 3, 4, 5, 7] } });
   });
 
+  it('manages tenant-scoped monitored conversations and manual groups', async () => {
+    const connection = await database!.query<{ id: string }>(
+      `SELECT id FROM whatsapp_connections WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 1`, [userA.id],
+    );
+    expect(connection.rows[0]).toBeDefined();
+    const chat = await database!.query<{ id: string }>(
+      `INSERT INTO monitored_chats (user_id,whatsapp_connection_id,jid,display_name,enabled)
+       VALUES ($1,$2,$3,'Contato com nome',false)
+       ON CONFLICT (user_id,whatsapp_connection_id,jid)
+       DO UPDATE SET display_name=EXCLUDED.display_name
+       RETURNING id`,
+      [userA.id, connection.rows[0]!.id, `contact-groups-${suffix}@s.whatsapp.net`],
+    );
+
+    const defaults = await app!.inject({ method: 'GET', url: '/api/whatsapp/chat-groups', headers: { cookie: cookieA } });
+    expect(defaults.statusCode).toBe(200);
+    expect(defaults.json()).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'Trabalho', system: true })]));
+
+    const created = await app!.inject({
+      method: 'POST', url: '/api/whatsapp/chat-groups', headers: { cookie: cookieA },
+      payload: { name: 'Clientes prioritários', description: 'Contatos profissionais importantes.' },
+    });
+    expect(created.statusCode).toBe(201);
+    const group = created.json() as { id: string; name: string };
+
+    const updated = await app!.inject({
+      method: 'PATCH', url: `/api/whatsapp/chats/${chat.rows[0]!.id}`, headers: { cookie: cookieA },
+      payload: { enabled: true, groupId: group.id },
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toMatchObject({ selected: true, group: { id: group.id, name: group.name }, classification: { source: 'manual' } });
+
+    const foreign = await app!.inject({
+      method: 'PATCH', url: `/api/whatsapp/chats/${chat.rows[0]!.id}`, headers: { cookie: cookieB },
+      payload: { enabled: false },
+    });
+    expect(foreign.statusCode).toBe(404);
+
+    const removed = await app!.inject({
+      method: 'DELETE', url: `/api/whatsapp/chat-groups/${group.id}`, headers: { cookie: cookieA },
+    });
+    expect(removed.statusCode).toBe(204);
+    const assignment = await database!.query<{ conversation_group_id: string | null; group_assignment_source: string | null }>(
+      'SELECT conversation_group_id,group_assignment_source FROM monitored_chats WHERE id=$1 AND user_id=$2',
+      [chat.rows[0]!.id, userA.id],
+    );
+    expect(assignment.rows[0]).toEqual({ conversation_group_id: null, group_assignment_source: null });
+  });
+
   it('marks an existing Trello projection pending and queues an idempotent versioned sync after PATCH', async () => {
     const created = await app!.inject({
       method: 'POST', url: '/api/tasks', headers: { cookie: cookieA },

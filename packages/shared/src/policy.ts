@@ -26,6 +26,31 @@ export function canExecuteCommitmentMutation(commitment: AiCommitment, context?:
 
 const DESTRUCTIVE_OPERATIONS = new Set<AiTask["operation"]>(["complete", "cancel", "merge"]);
 
+export function isEvidenceDirectedToUser(context: AiContext | undefined, evidenceMessageIds: readonly string[]): boolean {
+  if (!context) return true;
+  const isGroup = context.isGroupChat ?? context.chatJid.endsWith("@g.us");
+  if (!isGroup) return true;
+  const evidence = new Set(evidenceMessageIds);
+  return context.messages.some((message) => evidence.has(message.id) && (message.fromMe || message.directedToUser));
+}
+
+export function isTextAddressedToOwner(text: string, ownerNames: readonly string[]): boolean {
+  const normalizedText = text.normalize("NFD").replace(/\p{Diacritic}/gu, "").trim().toLocaleLowerCase("pt-BR");
+  return ownerNames.some((rawName) => {
+    const normalizedName = rawName.normalize("NFD").replace(/\p{Diacritic}/gu, "").trim().toLocaleLowerCase("pt-BR");
+    if (!normalizedName) return false;
+    const variants = [...new Set([normalizedName, normalizedName.split(/\s+/)[0]].filter(Boolean))];
+    return variants.some((name) =>
+      normalizedText === name
+      || normalizedText.startsWith(`${name},`)
+      || normalizedText.startsWith(`${name}:`)
+      || normalizedText.startsWith(`@${name} `)
+      || normalizedText.startsWith(`@${name},`)
+      || normalizedText.startsWith(`@${name}:`),
+    );
+  });
+}
+
 export function findInvalidDecisionReferences(
   decision: AiDecision,
   context: AiContext,
@@ -35,6 +60,7 @@ export function findInvalidDecisionReferences(
   const canonicalTaskIds = new Set(context.cardCandidates.flatMap((card) => card.canonicalTaskId ? [card.canonicalTaskId] : []));
   const memberIds = new Set(context.allowedTrelloMemberIds);
   const commitmentIds = new Set((context.commitmentCandidates ?? []).map((item) => item.id));
+  const conversationGroupIds = new Set((context.conversationGroups ?? []).map((item) => item.id));
   const allowedTargetIds = new Set([
     ...messageIds,
     ...cardIds,
@@ -42,6 +68,17 @@ export function findInvalidDecisionReferences(
   ]);
   const taskClientRefs = new Set(decision.tasks.map((task) => task.clientRef));
   const issues: string[] = [];
+  if (decision.conversationClassification) {
+    if (context.conversationClassification?.eligible !== true) {
+      issues.push("conversation classification was returned for an ineligible chat");
+    }
+    if (!conversationGroupIds.has(decision.conversationClassification.groupId)) {
+      issues.push(`conversation classification references unknown group ${decision.conversationClassification.groupId}`);
+    }
+    for (const id of decision.conversationClassification.evidenceMessageIds) {
+      if (!messageIds.has(id)) issues.push(`conversation classification references unknown message ${id}`);
+    }
+  }
   for (const task of decision.tasks) {
     for (const id of task.evidenceMessageIds) {
       if (!messageIds.has(id)) issues.push(`task ${task.clientRef} references unknown message ${id}`);
@@ -118,6 +155,9 @@ export function classifyTask(
 ): PlannedTask {
   if (task.operation === "ignore") {
     return { task, disposition: "ignore", reason: "model_marked_ignore" };
+  }
+  if (!isEvidenceDirectedToUser(context, task.evidenceMessageIds)) {
+    return { task, disposition: "ignore", reason: "group_message_not_directed_to_user" };
   }
   if (task.missingInformation.length > 0 || task.confidence < confidenceThreshold) {
     return { task, disposition: "review", reason: "low_confidence_or_missing_information" };

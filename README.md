@@ -15,9 +15,11 @@ O Atlas possui personalidade masculina, direta, humana e calma. Ele usa o nome p
 - Lembretes por prazo, recorrência, snooze, horário silencioso e recuperação após indisponibilidade.
 - Compromissos “eu devo” e “estão me devendo”, respostas pendentes e follow-ups.
 - Comandos naturais enviados ao número central do Atlas, como “feito”, “adiar 1h” e “amanhã às 9”.
+- Conversa livre com o assistente pelo número central, usando histórico, tarefas abertas e memórias da conta; o painel web não exibe um chat lateral de IA.
+- Contexto de grupos com identificação de menções e respostas ao dono, evitando transformar pedidos destinados a terceiros em tarefas pessoais.
+- Grupos de conversas e classificação gradual somente entre contatos com monitoramento autorizado.
 - Aprendizados com escopo, confiança, evidências, histórico, confirmação, pausa e esquecimento.
-- Segundo Cérebro no PostgreSQL com notas manuais, conteúdo gerado, wikilinks, backlinks, fontes, revisões, grafo e chat.
-- Chat com respostas fundamentadas e propostas confirmáveis de ação.
+- Segundo Cérebro no PostgreSQL com notas manuais, conteúdo gerado, wikilinks, backlinks, fontes, revisões e grafo.
 - Briefings às 08:00 e 18:00, configuráveis por conta.
 - DeepSeek V4 Flash com thinking habilitado e raciocínio médio.
 - Eventos em tempo real por SSE e execução assíncrona com `pg-boss`.

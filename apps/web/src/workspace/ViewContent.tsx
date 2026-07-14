@@ -10,10 +10,12 @@ import {
   ChevronRight,
   Circle,
   Clock3,
+  ExternalLink,
   FilePlus2,
   Filter,
   Link2,
   MessageCircle,
+  MessageSquareText,
   MoreHorizontal,
   Merge,
   Pencil,
@@ -23,12 +25,14 @@ import {
   Sparkles,
   SquareKanban,
   Tag,
+  Trash2,
   Users,
   Wifi,
   RefreshCw,
+  X,
 } from 'lucide-react';
 import { lazy, Suspense, useState } from 'react';
-import type { Chat, FeedbackAction, LearningAction, LearningEvidence, Note, NavId, TaskAction, WorkspaceData } from '../types';
+import type { Chat, CreateTaskInput, FeedbackAction, LearningAction, LearningEvidence, Note, NavId, TaskAction, TrelloCard, WorkspaceData } from '../types';
 import { EmptyState, ErrorState, Spinner } from '../components/ui';
 import { viewMeta } from './navigation';
 import { LearningsView, PersonalInboxView, PersonalTodayView } from './PersonalAssistantViews';
@@ -50,20 +54,29 @@ interface ViewContentProps {
   onRetryNote(): void;
   onToggleAutomation(id: string, enabled: boolean): void;
   onUpdateSettings(input: { reminderTimes?: string[]; notifySelf?: boolean }): void;
+  conversationLoading: boolean;
+  conversationError: string | null;
+  onRefreshConversations(): void;
+  onUpdateChat(id: string, input: { enabled?: boolean; groupId?: string | null }): void;
+  onCreateChatGroup(input: { name: string; description?: string }): void;
+  onDeleteChatGroup(id: string): void;
+  onCreateTask(input: CreateTaskInput): Promise<unknown>;
+  onRefreshWorkspace(): void;
   onFeedback(itemId: string, action: FeedbackAction, context: 'inbox' | 'activity'): void;
   onOpenTask(id: string): void;
-  onTaskAction(id: string, input: { action: TaskAction; targetTaskId?: string; snoozeUntil?: string; dueAt?: string }): void;
+  onTaskAction(id: string, input: { action: TaskAction; targetTaskId?: string; snoozeUntil?: string; dueAt?: string; comment?: string }): void;
   onCommitmentAction(id: string, input: { status?: 'open' | 'waiting' | 'fulfilled' | 'cancelled'; dueAt?: string | null; nextFollowUpAt?: string | null }): void;
   onLearningAction(id: string, action: LearningAction, statement?: string): void;
   onLoadLearningEvidence(id: string): Promise<LearningEvidence[]>;
   onReplan(): void;
   onCreateAutomation(input: { kind: 'briefing' | 'deadline' | 'overdue' | 'follow_up' | 'stale_task' | 'weekly_review'; time?: string }): void;
   onLoadChats(): Promise<Chat[]>;
-  onToggleChat(id: string, enabled: boolean): Promise<{ id: string; enabled: boolean }>;
+  onToggleChat(id: string, enabled: boolean): Promise<unknown>;
   onToggleAllChats(enabled: boolean): Promise<{ updated: number }>;
 }
 
 export function ViewContent(props: ViewContentProps) {
+  const [trelloFiltersOpen, setTrelloFiltersOpen] = useState(false);
   const meta = viewMeta[props.activeView];
   const Icon = meta.icon;
   return (
@@ -76,8 +89,8 @@ export function ViewContent(props: ViewContentProps) {
         </div>
         <div className="view-heading__actions">
           {props.activeView === 'brain' && <button className="button button--primary button--small" type="button" onClick={props.onNewNote}><FilePlus2 size={15} /> Nova nota</button>}
-          {['inbox', 'projects', 'people', 'trello'].includes(props.activeView) && <button className="button button--secondary button--small" type="button"><Filter size={14} /> Filtrar</button>}
-          <button className="icon-button" type="button" aria-label="Mais opções"><MoreHorizontal size={18} /></button>
+          {props.activeView === 'trello' && <button className="button button--secondary button--small" type="button" aria-pressed={trelloFiltersOpen} onClick={() => setTrelloFiltersOpen((open) => !open)}><Filter size={14} /> Filtrar</button>}
+          {props.activeView === 'trello' && <button className="icon-button" type="button" aria-label="Atualizar cartões do Trello" onClick={props.onRefreshWorkspace}><RefreshCw size={17} /></button>}
         </div>
       </header>
 
@@ -88,10 +101,10 @@ export function ViewContent(props: ViewContentProps) {
       {props.activeView === 'graph' && <Suspense fallback={<div className="center-state"><Spinner label="Preparando o grafo" /></div>}><KnowledgeGraph nodes={props.data.graph.nodes} edges={props.data.graph.edges} onOpenNode={props.onSelectNote} /></Suspense>}
       {props.activeView === 'projects' && <ProjectsView data={props.data} />}
       {props.activeView === 'people' && <PeopleView data={props.data} />}
-      {props.activeView === 'trello' && <TrelloView data={props.data} />}
+      {props.activeView === 'trello' && <TrelloView data={props.data} filtersOpen={trelloFiltersOpen} onCreateTask={props.onCreateTask} onOpenTask={props.onOpenTask} onTaskAction={props.onTaskAction} />}
       {props.activeView === 'learnings' && <LearningsView learnings={props.data.learnings ?? []} onAction={props.onLearningAction} onLoadEvidence={props.onLoadLearningEvidence} />}
       {props.activeView === 'automations' && <AutomationsView data={props.data} onToggle={props.onToggleAutomation} onCreate={props.onCreateAutomation} />}
-      {props.activeView === 'settings' && <SettingsView data={props.data} onUpdate={props.onUpdateSettings} />}
+      {props.activeView === 'settings' && <SettingsView {...props} />}
     </div>
   );
 }
@@ -216,14 +229,100 @@ function PeopleView({ data }: { data: WorkspaceData }) {
   ))}</div>;
 }
 
-function TrelloView({ data }: { data: WorkspaceData }) {
+const taskStatusForTrelloList = (list: string, cards: TrelloCard[]): CreateTaskInput['status'] => {
+  const role = cards.find((card) => card.list === list && card.listRole)?.listRole;
+  if (role === 'inProgress') return 'in_progress';
+  if (role === 'paused') return 'paused';
+  if (role === 'completed') return 'done';
+  if (role === 'inbox') return 'open';
+  const normalized = list.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLocaleLowerCase('pt-BR');
+  if (/conclu|finaliz|done/.test(normalized)) return 'done';
+  if (/andamento|progres|doing/.test(normalized)) return 'in_progress';
+  if (/paus|aguard|blocked/.test(normalized)) return 'paused';
+  return 'open';
+};
+
+const formatTrelloDue = (value?: string | null) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }).format(date);
+};
+
+function TrelloView({
+  data,
+  filtersOpen,
+  onCreateTask,
+  onOpenTask,
+  onTaskAction,
+}: {
+  data: WorkspaceData;
+  filtersOpen: boolean;
+  onCreateTask(input: CreateTaskInput): Promise<unknown>;
+  onOpenTask(id: string): void;
+  onTaskAction(id: string, input: { action: TaskAction; comment?: string }): void;
+}) {
+  const [search, setSearch] = useState('');
+  const [listFilter, setListFilter] = useState('all');
+  const [creatingIn, setCreatingIn] = useState<string | null>(null);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const [commenting, setCommenting] = useState<string | null>(null);
+  const [comment, setComment] = useState('');
   const lists = [...new Set(data.trelloCards.map((card) => card.list))];
   if (!data.trelloCards.length) return <EmptyState title="Nenhum cartão encontrado" description="Conecte uma lista no Trello para acompanhar tarefas com contexto." />;
+  const normalizedSearch = search.trim().toLocaleLowerCase('pt-BR');
+  const visibleLists = listFilter === 'all' ? lists : lists.filter((list) => list === listFilter);
+
+  const createInList = async (list: string) => {
+    const title = newTaskTitle.trim();
+    if (!title || creating) return;
+    setCreating(true);
+    try {
+      await onCreateTask({ title, status: taskStatusForTrelloList(list, data.trelloCards) });
+      setNewTaskTitle('');
+      setCreatingIn(null);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const sendComment = (card: TrelloCard) => {
+    const text = comment.trim();
+    if (!card.taskId || !text) return;
+    onTaskAction(card.taskId, { action: 'comment', comment: text });
+    setComment('');
+    setCommenting(null);
+    setOpenMenu(null);
+  };
+
   return (
-    <div className="trello-board">
-      {lists.map((list) => <section className="trello-column" key={list}><header><span><i />{list}</span><small>{data.trelloCards.filter((card) => card.list === list).length}</small><button type="button"><Plus size={14} /></button></header><div>{data.trelloCards.filter((card) => card.list === list).map((card) => (
-        <article className="trello-card" key={card.id}><div className="trello-labels">{card.labels.map((label) => <span key={label}>{label}</span>)}</div><strong>{card.title}</strong>{card.due && <small><CalendarClock size={13} /> {card.due}</small>}<footer><span className="mini-avatar">MC</span><button type="button"><MoreHorizontal size={15} /></button></footer></article>
-      ))}</div></section>)}
+    <div className="trello-view">
+      {filtersOpen && <div className="trello-toolbar" aria-label="Filtros do Trello"><label><Search size={14} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar cartão" aria-label="Buscar cartão" /></label><select value={listFilter} onChange={(event) => setListFilter(event.target.value)} aria-label="Filtrar por lista"><option value="all">Todas as listas</option>{lists.map((list) => <option value={list} key={list}>{list}</option>)}</select><span>{data.trelloCards.filter((card) => !normalizedSearch || card.title.toLocaleLowerCase('pt-BR').includes(normalizedSearch)).length} cartões</span></div>}
+      <div className="trello-board">
+        {visibleLists.map((list) => {
+          const cards = data.trelloCards.filter((card) => card.list === list && (!normalizedSearch || card.title.toLocaleLowerCase('pt-BR').includes(normalizedSearch)));
+          return <section className="trello-column" key={list}><header><span><i />{list}</span><small>{cards.length}</small><button type="button" aria-label={`Criar tarefa em ${list}`} onClick={() => { setCreatingIn((current) => current === list ? null : list); setNewTaskTitle(''); }}><Plus size={14} /></button></header>
+            {creatingIn === list && <form className="trello-create-card" onSubmit={(event) => { event.preventDefault(); void createInList(list); }}><input autoFocus value={newTaskTitle} onChange={(event) => setNewTaskTitle(event.target.value)} placeholder="Título da nova tarefa" aria-label={`Título da nova tarefa em ${list}`} /><div><button type="submit" disabled={!newTaskTitle.trim() || creating}><Check size={13} /> {creating ? 'Criando' : 'Criar'}</button><button type="button" onClick={() => setCreatingIn(null)} aria-label="Cancelar criação"><X size={13} /></button></div></form>}
+            <div>{cards.map((card) => (
+              <article className="trello-card" key={card.id}>
+                <div className="trello-labels">{card.labels.map((label) => <span key={label}>{label}</span>)}</div>
+                <button type="button" className="trello-card__title" disabled={!card.taskId} onClick={() => card.taskId && onOpenTask(card.taskId)}>{card.title}</button>
+                {card.due && <small><CalendarClock size={13} /> {formatTrelloDue(card.due)}</small>}
+                <footer><span className="mini-avatar">A</span><button type="button" aria-label={`Ações de ${card.title}`} aria-expanded={openMenu === card.id} onClick={() => { setOpenMenu((current) => current === card.id ? null : card.id); setCommenting(null); }}><MoreHorizontal size={15} /></button></footer>
+                {openMenu === card.id && <div className="trello-card-menu">
+                  <button type="button" disabled={!card.taskId} onClick={() => { if (card.taskId) onOpenTask(card.taskId); setOpenMenu(null); }}><SquareKanban size={13} /> Abrir detalhes</button>
+                  <button type="button" disabled={!card.taskId || card.listRole === 'completed'} onClick={() => { if (card.taskId) onTaskAction(card.taskId, { action: 'complete' }); setOpenMenu(null); }}><CheckCircle2 size={13} /> Concluir tarefa</button>
+                  <button type="button" disabled={!card.taskId} onClick={() => setCommenting(card.id)}><MessageSquareText size={13} /> Comentar no Trello</button>
+                  {card.url && <a href={card.url} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Abrir no Trello</a>}
+                </div>}
+                {commenting === card.id && <form className="trello-comment-form" onSubmit={(event) => { event.preventDefault(); sendComment(card); }}><textarea autoFocus value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Comentário que será enviado ao cartão" aria-label={`Comentário em ${card.title}`} rows={3} /><div><button type="submit" disabled={!comment.trim()}><MessageSquareText size={13} /> Enviar</button><button type="button" onClick={() => { setCommenting(null); setComment(''); }}><X size={13} /> Cancelar</button></div></form>}
+              </article>
+            ))}{!cards.length && <div className="trello-column__empty">Nenhum cartão neste filtro.</div>}</div>
+          </section>;
+        })}
+      </div>
     </div>
   );
 }
@@ -253,16 +352,87 @@ function AiUsagePanel({ usage }: { usage: WorkspaceData['aiUsage'] }) {
   return <section className="ai-usage"><header><div><span className="section-kicker"><Sparkles size={13} /> Uso de IA</span><h2>Operação e custo</h2></div><small>{usage.period}</small></header><div className="ai-usage__grid"><article><span>Chamadas</span><strong>{usage.calls.toLocaleString('pt-BR')}</strong><small>requisições</small></article><article><span>Tokens</span><strong>{formatNumber.format(usage.tokens)}</strong><small>entrada + saída</small></article><article><span>Latência</span><strong>{(usage.latencyMs / 1000).toFixed(2)}s</strong><small>média</small></article><article><span>Erros</span><strong>{usage.errorRate.toFixed(2)}%</strong><small>{usage.errors} falhas</small></article><article><span>Custo</span><strong>{(usage.costCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'USD' })}</strong><small>estimado</small></article></div></section>;
 }
 
-function SettingsView({ data, onUpdate }: { data: WorkspaceData; onUpdate(input: { reminderTimes?: string[]; notifySelf?: boolean }): void }) {
+function SettingsView(props: ViewContentProps) {
+  const { data, onUpdateSettings: onUpdate } = props;
   const status = data.integrationStatus;
+  const monitoredChats = data.chats
+    ? data.chats.filter((chat) => chat.selected).length
+    : status?.monitoredChats ?? 0;
   const settings = data.settings ?? { timezone: 'America/Sao_Paulo', reminderTimes: ['08:00', '18:00'], notifySelf: true };
   const morning = settings.reminderTimes[0] ?? '08:00';
   const evening = settings.reminderTimes[1] ?? '18:00';
   return (
     <div className="settings-layout">
-      <section className="settings-section"><header><div><h2>Integrações</h2><p>Fontes conectadas ao seu espaço.</p></div></header><div className="integration-list"><article><span className="integration-logo integration-logo--whatsapp"><MessageCircle size={20} /></span><div><strong>WhatsApp pessoal · somente leitura</strong><small>{status?.whatsappConnected ? `${status.monitoredChats} conversa${status.monitoredChats === 1 ? '' : 's'} acompanhada${status.monitoredChats === 1 ? '' : 's'}` : 'Aguardando conexão'}</small></div><span className={status?.whatsappConnected ? 'connected-pill' : 'status-pill status-pill--paused'}>{status?.whatsappConnected && <Check size={12} />} {status?.whatsappConnected ? 'Conectado' : 'Desconectado'}</span></article><article><span className="integration-logo integration-logo--trello"><SquareKanban size={20} /></span><div><strong>Trello</strong><small>{status?.trelloConnected ? 'Quadro principal configurado' : 'Aguardando autorização'}</small></div><span className={status?.trelloConnected ? 'connected-pill' : 'status-pill status-pill--paused'}>{status?.trelloConnected && <Check size={12} />} {status?.trelloConnected ? 'Conectado' : 'Desconectado'}</span></article></div></section>
+      <ConversationSettings {...props} />
+      <section className="settings-section"><header><div><h2>Integrações</h2><p>Fontes conectadas ao seu espaço.</p></div></header><div className="integration-list"><article><span className="integration-logo integration-logo--whatsapp"><MessageCircle size={20} /></span><div><strong>WhatsApp pessoal · somente leitura</strong><small>{status?.whatsappConnected ? `${monitoredChats} conversa${monitoredChats === 1 ? '' : 's'} acompanhada${monitoredChats === 1 ? '' : 's'}` : 'Aguardando conexão'}</small></div><span className={status?.whatsappConnected ? 'connected-pill' : 'status-pill status-pill--paused'}>{status?.whatsappConnected && <Check size={12} />} {status?.whatsappConnected ? 'Conectado' : 'Desconectado'}</span></article><article><span className="integration-logo integration-logo--trello"><SquareKanban size={20} /></span><div><strong>Trello</strong><small>{status?.trelloConnected ? 'Quadro principal configurado' : 'Aguardando autorização'}</small></div><span className={status?.trelloConnected ? 'connected-pill' : 'status-pill status-pill--paused'}>{status?.trelloConnected && <Check size={12} />} {status?.trelloConnected ? 'Conectado' : 'Desconectado'}</span></article></div></section>
       <section className="settings-section"><header><div><h2>Mensagens e notificações</h2><p>Controle quando Atlas fala com você.</p></div></header><div className="setting-rows"><label><span><strong>Receber lembretes do Atlas</strong><small>O número central envia mensagens somente para o telefone identificado no seu QR pessoal.</small></span><span className="switch"><input type="checkbox" checked={settings.notifySelf} onChange={(event) => onUpdate({ notifySelf: event.target.checked })} /><i /></span></label><label><span><strong>Briefing da manhã</strong><small>Prioridades e prazos no início do dia.</small></span><input type="time" value={morning} onChange={(event) => onUpdate({ reminderTimes: [event.target.value, evening] })} /></label><label><span><strong>Briefing da tarde</strong><small>Pendências e respostas antes de encerrar o dia.</small></span><input type="time" value={evening} onChange={(event) => onUpdate({ reminderTimes: [morning, event.target.value] })} /></label></div></section>
-      <section className="settings-section"><header><div><h2>Privacidade</h2><p>Seus dados, suas regras.</p></div></header><div className="privacy-settings"><article><span><Users size={18} /></span><div><strong>Conversas acompanhadas</strong><p>{status?.monitoredChats ?? 0} conversa{status?.monitoredChats === 1 ? '' : 's'} autorizada{status?.monitoredChats === 1 ? '' : 's'}. Todo o restante é ignorado.</p></div></article><article><span><Tag size={18} /></span><div><strong>Exportação</strong><p>A exportação completa dos dados está prevista para uma versão futura.</p></div></article></div></section>
+      <section className="settings-section"><header><div><h2>Privacidade</h2><p>Seus dados, suas regras.</p></div></header><div className="privacy-settings"><article><span><Users size={18} /></span><div><strong>Conversas acompanhadas</strong><p>{monitoredChats} conversa{monitoredChats === 1 ? '' : 's'} autorizada{monitoredChats === 1 ? '' : 's'}. Todo o restante é ignorado.</p></div></article><article><span><Tag size={18} /></span><div><strong>Exportação</strong><p>A exportação completa dos dados está prevista para uma versão futura.</p></div></article></div></section>
     </div>
+  );
+}
+
+function ConversationSettings({
+  data,
+  conversationLoading,
+  conversationError,
+  onRefreshConversations,
+  onUpdateChat,
+  onCreateChatGroup,
+  onDeleteChatGroup,
+}: Pick<ViewContentProps, 'data' | 'conversationLoading' | 'conversationError' | 'onRefreshConversations' | 'onUpdateChat' | 'onCreateChatGroup' | 'onDeleteChatGroup'>) {
+  const [search, setSearch] = useState('');
+  const [groupFilter, setGroupFilter] = useState('all');
+  const [creatingGroup, setCreatingGroup] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const chats = data.chats ?? [];
+  const groups = data.chatGroups ?? [];
+  const monitoredCount = chats.filter((chat) => chat.selected).length;
+  const normalizedSearch = search.trim().toLocaleLowerCase('pt-BR');
+  const filteredChats = chats.filter((chat) => {
+    if (normalizedSearch && !chat.name.toLocaleLowerCase('pt-BR').includes(normalizedSearch)) return false;
+    if (groupFilter === 'automatic') return !chat.group;
+    if (groupFilter !== 'all') return chat.group?.id === groupFilter;
+    return true;
+  });
+  const submitGroup = () => {
+    const name = newGroupName.trim();
+    if (!name) return;
+    onCreateChatGroup({ name, description: 'Grupo personalizado criado por você.' });
+    setNewGroupName('');
+    setCreatingGroup(false);
+  };
+  return (
+    <section className="settings-section conversation-settings">
+      <header>
+        <div><h2>Conversas monitoradas</h2><p>Escolha quem o Atlas pode acompanhar e organize seus contextos.</p></div>
+        <button className="button button--secondary button--small" type="button" onClick={() => setCreatingGroup((value) => !value)}><Plus size={14} /> Novo grupo</button>
+      </header>
+      <div className="conversation-privacy-note"><Sparkles size={16} /><p><strong>Classificação privada e gradual.</strong> A IA aprende e classifica somente conversas com monitoramento ativo. Uma escolha manual de grupo nunca é substituída.</p></div>
+      {creatingGroup && <div className="conversation-group-form"><label><span>Nome do grupo</span><input value={newGroupName} onChange={(event) => setNewGroupName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submitGroup(); }} placeholder="Ex.: Clientes importantes" autoFocus /></label><button className="button button--primary button--small" type="button" onClick={submitGroup} disabled={!newGroupName.trim()}>Criar</button><button className="button button--ghost button--small" type="button" onClick={() => setCreatingGroup(false)}>Cancelar</button></div>}
+      <div className="conversation-group-strip" aria-label="Grupos de conversas">
+        <button type="button" className={groupFilter === 'all' ? 'is-active' : ''} onClick={() => setGroupFilter('all')}><i style={{ background: '#8B8394' }} />Todas <small>{chats.length}</small></button>
+        <button type="button" className={groupFilter === 'automatic' ? 'is-active' : ''} onClick={() => setGroupFilter('automatic')}><i style={{ background: '#A98BF7' }} />Atlas classifica <small>{chats.filter((chat) => !chat.group).length}</small></button>
+        {groups.map((group) => <span className="conversation-group-chip" key={group.id}><button type="button" className={groupFilter === group.id ? 'is-active' : ''} onClick={() => setGroupFilter(group.id)}><i style={{ background: group.color }} />{group.name} <small>{group.chatCount}</small></button>{!group.system && <button type="button" className="conversation-group-delete" onClick={() => onDeleteChatGroup(group.id)} aria-label={`Excluir grupo ${group.name}`}><Trash2 size={12} /></button>}</span>)}
+      </div>
+      <div className="conversation-toolbar"><label className="search-field"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar conversa pelo nome" /></label><span><strong>{monitoredCount}</strong> de {chats.length} monitoradas</span><button type="button" className="icon-button" onClick={onRefreshConversations} aria-label="Atualizar conversas"><RefreshCw size={15} /></button></div>
+      {conversationLoading && !chats.length ? <div className="conversation-state"><Spinner label="Buscando nomes e conversas" /></div>
+        : conversationError ? <ErrorState title="Não foi possível carregar as conversas" message={conversationError} onRetry={onRefreshConversations} />
+          : filteredChats.length ? <div className="conversation-management-list">{filteredChats.map((chat) => {
+            const automatic = chat.classification?.source !== 'manual';
+            const statusText = !chat.selected
+              ? 'Ignorada · a IA não lê nem classifica'
+              : chat.classification?.source === 'ai' && chat.group
+                ? `Classificada pela IA · ${Math.round((chat.classification.confidence ?? 0) * 100)}%`
+                : chat.classification?.source === 'manual'
+                  ? 'Grupo definido por você'
+                  : 'Atlas classificará conforme adquirir contexto';
+            return <article className={`conversation-management-row ${chat.selected ? 'is-monitored' : ''}`} key={chat.id}>
+              <span className="chat-avatar">{chat.kind === 'group' ? <Users size={17} /> : chat.name.slice(0, 2).toUpperCase()}</span>
+              <div className="conversation-management-copy"><strong>{chat.name}</strong><small>{chat.kind === 'group' ? 'Grupo' : 'Contato'} · {statusText}</small>{chat.classification?.reason && chat.selected && <em>{chat.classification.reason}</em>}</div>
+              <label className="conversation-group-select"><span>Contexto</span><select value={automatic ? 'automatic' : chat.group?.id ?? 'automatic'} onChange={(event) => onUpdateChat(chat.id, { groupId: event.target.value === 'automatic' ? null : event.target.value })}><option value="automatic">Atlas classifica{automatic && chat.group ? ` · ${chat.group.name}` : ''}</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
+              <label className="switch conversation-monitor-switch" title={chat.selected ? 'Desativar monitoramento' : 'Ativar monitoramento'}><input type="checkbox" checked={chat.selected === true} onChange={(event) => onUpdateChat(chat.id, { enabled: event.target.checked })} /><i /></label>
+            </article>;
+          })}</div> : <div className="conversation-state"><MessageCircle size={22} /><strong>Nenhuma conversa encontrada</strong><p>Depois que o WhatsApp sincronizar o histórico do QR, os nomes aparecerão aqui.</p></div>}
+    </section>
   );
 }

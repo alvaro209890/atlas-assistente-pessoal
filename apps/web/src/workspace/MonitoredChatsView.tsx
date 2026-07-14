@@ -13,7 +13,7 @@ type ChatFilter = 'all' | 'monitored' | 'direct' | 'group';
 
 interface MonitoredChatsViewProps {
   onLoadChats: () => Promise<Chat[]>;
-  onToggleChat: (id: string, enabled: boolean) => Promise<{ id: string; enabled: boolean }>;
+  onToggleChat: (id: string, enabled: boolean) => Promise<unknown>;
   onToggleAll: (enabled: boolean) => Promise<{ updated: number }>;
 }
 

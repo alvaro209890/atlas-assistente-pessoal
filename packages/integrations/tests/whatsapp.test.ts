@@ -5,7 +5,9 @@ import {
   createQrDataUrl,
   extractTextMessageContent,
   isMonitorableChatJid,
+  isWhatsAppMessageDirectedToUser,
   mapWhatsAppContactNames,
+  mapContactCatalog,
   normalizeBrazilianPhone,
   shouldProcessWhatsAppChat,
   type BaileysAuthRepository,
@@ -59,10 +61,41 @@ describe("WhatsApp integration", () => {
     expect(second.state.creds.registered).toBe(true);
   });
 
+  it("keeps contact names from the initial history snapshot", () => {
+    expect(mapContactCatalog([
+      { id: "5511999999999:4@s.whatsapp.net", name: "João Cliente" },
+      { id: "5511888888888@s.whatsapp.net", notify: "Maria Estudos" },
+      { id: "5511777777777@s.whatsapp.net" },
+    ])).toEqual([
+      { jid: "5511999999999@s.whatsapp.net", name: "João Cliente" },
+      { jid: "5511888888888@s.whatsapp.net", name: "Maria Estudos" },
+    ]);
+  });
+
   it("accepts the self chat as a command channel even when it is not monitored", () => {
     expect(shouldProcessWhatsAppChat("5511999@s.whatsapp.net", "5511999:12@s.whatsapp.net", false)).toBe(true);
     expect(shouldProcessWhatsAppChat("group@g.us", "5511999@s.whatsapp.net", false)).toBe(false);
     expect(shouldProcessWhatsAppChat("selected@g.us", "5511999@s.whatsapp.net", true)).toBe(true);
+  });
+
+  it("only marks group messages as directed when the owner is mentioned or quoted", () => {
+    const base = {
+      isGroup: true,
+      fromMe: false,
+      selfJids: ["5511999999999@s.whatsapp.net", "123456@lid"],
+    };
+    expect(isWhatsAppMessageDirectedToUser({
+      ...base, mentionedJids: [], quotedParticipantJid: null,
+    })).toBe(false);
+    expect(isWhatsAppMessageDirectedToUser({
+      ...base, mentionedJids: ["123456:7@lid"], quotedParticipantJid: null,
+    })).toBe(true);
+    expect(isWhatsAppMessageDirectedToUser({
+      ...base, mentionedJids: [], quotedParticipantJid: "5511999999999:3@s.whatsapp.net",
+    })).toBe(true);
+    expect(isWhatsAppMessageDirectedToUser({
+      ...base, isGroup: false, mentionedJids: [], quotedParticipantJid: null,
+    })).toBe(true);
   });
 
   it("só considera grupos e chats diretos como monitoráveis (exclui @lid e afins)", () => {

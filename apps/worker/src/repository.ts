@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { Database } from "@atlas/database";
 import {
   normalizeBrazilianPhone,
+  type AssistantConversationInput,
   type BaileysAuthRepository,
   type Notification,
   type SelectedChatRepository,
@@ -21,6 +22,8 @@ import {
   aiTaskSchema,
   buildAiContext,
   canExecuteCommitmentMutation,
+  isEvidenceDirectedToUser,
+  isTextAddressedToOwner,
   makeCanonicalTaskFingerprint,
   shouldActivateLearning,
   type ActionProposal,
@@ -340,7 +343,10 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
         await client.query(
           `INSERT INTO whatsapp_conversation_catalog
              (user_id, whatsapp_connection_id, jid, display_name, is_group, conversation_timestamp)
-           VALUES ($1, $2, $3, $4, $5, $6)
+           VALUES ($1, $2, $3, COALESCE((
+             SELECT display_name FROM whatsapp_contact_catalog
+             WHERE user_id=$1 AND whatsapp_connection_id=$2 AND jid=$3
+           ),NULLIF($4,''),''), $5, $6)
            ON CONFLICT (user_id, whatsapp_connection_id, jid)
            DO UPDATE SET display_name = CASE
                WHEN EXCLUDED.display_name <> '' THEN EXCLUDED.display_name
@@ -361,7 +367,10 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
         await client.query(
           `INSERT INTO monitored_chats
              (user_id, whatsapp_connection_id, jid, display_name, is_group, enabled)
-           VALUES ($1, $2, $3, $4, $5, false)
+           VALUES ($1, $2, $3, COALESCE((
+             SELECT display_name FROM whatsapp_contact_catalog
+             WHERE user_id=$1 AND whatsapp_connection_id=$2 AND jid=$3
+           ),NULLIF($4,''),''), $5, false)
            ON CONFLICT (user_id, whatsapp_connection_id, jid)
            DO UPDATE SET display_name = CASE
                WHEN EXCLUDED.display_name <> '' THEN EXCLUDED.display_name
@@ -392,6 +401,14 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
         // ($5=false) só preenchem quando o chat ainda está sem nome.
         const saved = contact.saved === true;
         await client.query(
+          `INSERT INTO whatsapp_contact_catalog
+             (user_id,whatsapp_connection_id,jid,display_name,last_seen_at)
+           VALUES ($1,$2,$3,$4,now())
+           ON CONFLICT (user_id,whatsapp_connection_id,jid)
+           DO UPDATE SET display_name=EXCLUDED.display_name,last_seen_at=now()`,
+          [userId, connectionId, contact.jid, contact.name],
+        );
+        await client.query(
           `UPDATE whatsapp_conversation_catalog
            SET display_name = $4, last_seen_at = now()
            WHERE user_id = $1 AND whatsapp_connection_id = $2 AND jid = $3
@@ -414,9 +431,10 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
     const result = await this.database.query<IdRow>(
       `INSERT INTO whatsapp_messages
          (user_id, whatsapp_connection_id, monitored_chat_id, external_message_id,
-          chat_jid, sender_jid, direction, from_me, message_type, body, sent_at)
+          chat_jid, sender_jid, direction, from_me, message_type, body,
+          quoted_external_message_id, sent_at, metadata)
        SELECT $1, $2, mc.id, $3, $4, $5,
-         CASE WHEN $6 THEN 'outbound' ELSE 'inbound' END, $6, 'text', $7, $8
+         CASE WHEN $6 THEN 'outbound' ELSE 'inbound' END, $6, 'text', $7, $8, $9, $10::jsonb
        FROM whatsapp_connections wc
        LEFT JOIN monitored_chats mc ON mc.user_id=wc.user_id
          AND mc.whatsapp_connection_id=wc.id AND mc.jid=$4 AND mc.enabled=true
@@ -436,7 +454,15 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
         message.senderJid,
         message.fromMe,
         message.text,
+        message.quotedMessageId ?? null,
         message.sentAt,
+        JSON.stringify({
+          isGroup: message.isGroup ?? message.chatJid.endsWith("@g.us"),
+          mentionedJids: message.mentionedJids ?? [],
+          quotedParticipantJid: message.quotedParticipantJid ?? null,
+          directedToUser: message.directedToUser ?? !message.chatJid.endsWith("@g.us"),
+          senderName: message.senderName,
+        }),
       ],
     );
     return result.rowCount === 1;
@@ -452,13 +478,15 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
       sent_at: Date;
       from_me: boolean;
       body: string;
+      quoted_external_message_id: string | null;
+      metadata: Record<string, unknown>;
     }>(
       `SELECT external_message_id, user_id, chat_jid, sender_jid, display_name,
-              sent_at, from_me, body
+              sent_at, from_me, body, quoted_external_message_id, metadata
        FROM (
          SELECT wm.external_message_id, wm.user_id, wm.chat_jid, wm.sender_jid,
                 NULLIF(mc.display_name, '') AS display_name, wm.sent_at,
-                wm.from_me, wm.body,
+                wm.from_me, wm.body, wm.quoted_external_message_id, wm.metadata,
                 row_number() OVER (
                   PARTITION BY wm.user_id, wm.chat_jid ORDER BY wm.sent_at DESC
                 ) AS position
@@ -485,6 +513,15 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
       sentAt: row.sent_at.toISOString(),
       fromMe: row.from_me,
       text: row.body,
+      isGroup: typeof row.metadata?.isGroup === "boolean" ? row.metadata.isGroup : row.chat_jid.endsWith("@g.us"),
+      mentionedJids: Array.isArray(row.metadata?.mentionedJids)
+        ? row.metadata.mentionedJids.filter((value): value is string => typeof value === "string")
+        : [],
+      quotedParticipantJid: typeof row.metadata?.quotedParticipantJid === "string" ? row.metadata.quotedParticipantJid : null,
+      quotedMessageId: row.quoted_external_message_id,
+      directedToUser: typeof row.metadata?.directedToUser === "boolean"
+        ? row.metadata.directedToUser
+        : (row.from_me || !row.chat_jid.endsWith("@g.us")),
     }));
   }
 
@@ -587,9 +624,12 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
       from_me: boolean;
       body: string;
       display_name: string | null;
+      metadata: Record<string, unknown>;
+      quoted_external_message_id: string | null;
     }>(
       `SELECT wm.external_message_id, wm.sender_jid, wm.sent_at, wm.from_me, wm.body,
-              NULLIF(mc.display_name, '') AS display_name
+              COALESCE(NULLIF(wm.metadata->>'senderName',''),NULLIF(mc.display_name, '')) AS display_name,
+              wm.metadata,wm.quoted_external_message_id
        FROM whatsapp_messages wm
        LEFT JOIN monitored_chats mc ON mc.id = wm.monitored_chat_id
        WHERE wm.user_id = $1 AND wm.chat_jid = $2
@@ -607,8 +647,9 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
       work_start: string;
       work_end: string;
       communication_style: string;
+      display_name: string;
     }>(
-      `SELECT us.timezone,us.locale,us.feature_flags,u.preferred_name,
+      `SELECT us.timezone,us.locale,us.feature_flags,u.preferred_name,u.display_name,
               up.professional_area,COALESCE(up.goals,'{}') AS goals,
               us.work_days,us.work_start::text,us.work_end::text,us.communication_style
        FROM user_settings us
@@ -619,6 +660,15 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
     );
     const featureFlags = settings.rows[0]?.feature_flags ?? {};
     const profile = settings.rows[0];
+    const ownerConnections = await this.database.query<{ self_jid: string }>(
+      `SELECT DISTINCT self_jid FROM whatsapp_connections
+       WHERE user_id=$1 AND self_jid IS NOT NULL`,
+      [userId],
+    );
+    const ownerNames = [...new Set([
+      profile?.preferred_name,
+      profile?.display_name,
+    ].filter((name): name is string => typeof name === "string" && name.trim().length > 0))];
     const personalization = profile
       ? composeAtlasPersonalization({
           preferredName: profile.preferred_name,
@@ -791,19 +841,74 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
        ORDER BY completed_at DESC LIMIT 1`,
       [userId, chatJid],
     );
+    const classificationStateResult = await this.database.query<{
+      enabled: boolean;
+      conversation_group_id: string | null;
+      group_assignment_source: "manual" | "ai" | null;
+      classification_message_count: number;
+      message_count: number;
+    }>(
+      `SELECT mc.enabled,mc.conversation_group_id::text,mc.group_assignment_source,
+              mc.classification_message_count,
+              count(wm.id)::int AS message_count
+       FROM monitored_chats mc
+       LEFT JOIN whatsapp_messages wm ON wm.user_id=mc.user_id AND wm.chat_jid=mc.jid
+       WHERE mc.user_id=$1 AND mc.jid=$2
+       GROUP BY mc.id
+       ORDER BY mc.updated_at DESC LIMIT 1`,
+      [userId, chatJid],
+    );
+    const classificationRow = classificationStateResult.rows[0];
+    const classificationMessageCount = Number(classificationRow?.message_count ?? 0);
+    const lastClassificationCount = Number(classificationRow?.classification_message_count ?? 0);
+    const classificationEligible = Boolean(
+      classificationRow?.enabled
+      && classificationRow.group_assignment_source !== "manual"
+      && classificationMessageCount >= 3
+      && (lastClassificationCount === 0 || classificationMessageCount - lastClassificationCount >= 5),
+    );
+    const conversationGroupsResult = classificationEligible
+      ? await this.database.query<{ id: string; name: string; description: string }>(
+          `SELECT id::text,name,description FROM conversation_groups
+           WHERE user_id=$1 ORDER BY sort_order,name LIMIT 30`,
+          [userId],
+        )
+      : { rows: [] as Array<{ id: string; name: string; description: string }> };
 
-    const recentMessages: NormalizedMessage[] = recent.rows.map((row) => ({
-      id: row.external_message_id,
-      userId,
-      chatJid,
-      senderJid: row.sender_jid,
-      senderName: row.display_name,
-      sentAt: row.sent_at.toISOString(),
-      fromMe: row.from_me,
-      text: row.body,
-    }));
+    const recentMessages: NormalizedMessage[] = recent.rows.map((row) => {
+      const isGroup = typeof row.metadata?.isGroup === "boolean" ? row.metadata.isGroup : chatJid.endsWith("@g.us");
+      const explicitlyDirected = typeof row.metadata?.directedToUser === "boolean"
+        ? row.metadata.directedToUser
+        : (row.from_me || !isGroup);
+      return {
+        id: row.external_message_id,
+        userId,
+        chatJid,
+        senderJid: row.sender_jid,
+        senderName: row.display_name,
+        sentAt: row.sent_at.toISOString(),
+        fromMe: row.from_me,
+        text: row.body,
+        isGroup,
+        mentionedJids: Array.isArray(row.metadata?.mentionedJids)
+          ? row.metadata.mentionedJids.filter((value): value is string => typeof value === "string")
+          : [],
+        quotedParticipantJid: typeof row.metadata?.quotedParticipantJid === "string" ? row.metadata.quotedParticipantJid : null,
+        quotedMessageId: row.quoted_external_message_id,
+        directedToUser: explicitlyDirected || (isGroup && isTextAddressedToOwner(row.body, ownerNames)),
+      };
+    });
     const merged = new Map<string, NormalizedMessage>();
-    for (const message of [...recentMessages, ...batchMessages]) merged.set(message.id, message);
+    for (const message of [...recentMessages, ...batchMessages]) {
+      const isGroup = message.isGroup ?? message.chatJid.endsWith("@g.us");
+      merged.set(message.id, {
+        ...message,
+        isGroup,
+        directedToUser: message.fromMe
+          || message.directedToUser === true
+          || (isGroup && isTextAddressedToOwner(message.text, ownerNames)),
+      });
+    }
     const memories: KnownMemory[] = memoriesResult.rows.map((row) => ({
       nodeType: row.type,
       title: row.title,
@@ -868,11 +973,23 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
       previousSummary: previous.rows[0]?.summary ?? null,
       preferences,
       messages: [...merged.values()],
+      isGroupChat: chatJid.endsWith("@g.us"),
+      ownerIdentity: {
+        jids: ownerConnections.rows.map((row) => row.self_jid),
+        names: ownerNames,
+      },
       memories,
       corrections,
       activeLearnings,
       cardCandidates,
       commitmentCandidates,
+      conversationGroups: conversationGroupsResult.rows,
+      conversationClassification: {
+        eligible: classificationEligible,
+        messageCount: classificationMessageCount,
+        currentGroupId: classificationRow?.conversation_group_id ?? null,
+        currentSource: classificationRow?.group_assignment_source ?? null,
+      },
       allowedListKeys,
       allowedTrelloMemberIds: allowedMembers.rows.map((row) => row.member_id),
       isSelfChat: selfChatResult.rows[0]?.is_self_chat ?? false,
@@ -1124,6 +1241,56 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
       return true;
     });
     return result;
+  }
+
+  async buildAssistantConversation(userId: string): Promise<AssistantConversationInput> {
+    const user = await this.database.query<{ preferred_name: string }>(
+      "SELECT preferred_name FROM users WHERE id=$1",
+      [userId],
+    );
+    const history = await this.database.query<{
+      direction: "inbound" | "outbound";
+      body: string;
+    }>(
+      `SELECT direction,body FROM (
+         SELECT direction,body,sent_at,id
+         FROM platform_whatsapp_messages
+         WHERE user_id=$1
+         ORDER BY sent_at DESC,id DESC LIMIT 20
+       ) recent ORDER BY sent_at,id`,
+      [userId],
+    );
+    const tasks = await this.database.query<{
+      id: string;
+      title: string;
+      status: string;
+      due_at: Date | null;
+    }>(
+      `SELECT id::text,title,status,due_at FROM canonical_tasks
+       WHERE user_id=$1 AND status NOT IN ('done','cancelled','merged')
+       ORDER BY due_at NULLS LAST,updated_at DESC LIMIT 20`,
+      [userId],
+    );
+    const memories = await this.database.query<{ title: string; content: string }>(
+      `SELECT title,concat_ws(E'\n',NULLIF(manual_content,''),NULLIF(generated_content,'')) AS content
+       FROM brain_nodes WHERE user_id=$1 AND status='active' AND type<>'task'
+       ORDER BY updated_at DESC LIMIT 10`,
+      [userId],
+    );
+    return {
+      preferredName: user.rows[0]?.preferred_name ?? "Pessoa",
+      messages: history.rows.map((message) => ({
+        role: message.direction === "inbound" ? "user" : "assistant",
+        content: message.body,
+      })),
+      tasks: tasks.rows.map((task) => ({
+        id: task.id,
+        title: task.title,
+        status: task.status,
+        dueAt: task.due_at?.toISOString() ?? null,
+      })),
+      memories: memories.rows,
+    };
   }
 
   platformAuthRepository(): BaileysAuthRepository {
@@ -1598,14 +1765,51 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
   }
 
   async persistDecisionArtifacts(userId: string, decision: AiDecision, batchKey: string, context?: AiContext): Promise<void> {
+    await this.persistConversationClassification(userId, decision, context);
     await this.persistCommitments(userId, decision.commitments, batchKey, context);
-    await this.persistReminders(userId, decision.reminders, batchKey);
+    await this.persistReminders(userId, decision.reminders, batchKey, context);
     await this.persistLearnings(userId, decision.learnings, batchKey);
-    await this.persistActionProposals(userId, decision.actionProposals, batchKey);
+    await this.persistActionProposals(userId, decision.actionProposals, batchKey, context);
+  }
+
+  private async persistConversationClassification(
+    userId: string,
+    decision: AiDecision,
+    context?: AiContext,
+  ): Promise<void> {
+    const state = context?.conversationClassification;
+    const chatJid = context?.chatJid;
+    if (!state?.eligible || !chatJid) return;
+    const classification = decision.conversationClassification ?? null;
+    const accepted = classification && classification.confidence >= 0.72
+      ? classification
+      : null;
+    await this.database.query(
+      `UPDATE monitored_chats SET
+         conversation_group_id=CASE WHEN $3::uuid IS NOT NULL THEN $3::uuid ELSE conversation_group_id END,
+         group_assignment_source=CASE WHEN $3::uuid IS NOT NULL THEN 'ai' ELSE group_assignment_source END,
+         group_confidence=CASE WHEN $3::uuid IS NOT NULL THEN $4 ELSE group_confidence END,
+         group_reason=CASE WHEN $3::uuid IS NOT NULL THEN $5 ELSE group_reason END,
+         group_last_classified_at=now(),classification_message_count=$6
+       WHERE user_id=$1 AND jid=$2 AND enabled=true
+         AND group_assignment_source IS DISTINCT FROM 'manual'
+         AND ($3::uuid IS NULL OR EXISTS (
+           SELECT 1 FROM conversation_groups cg WHERE cg.id=$3::uuid AND cg.user_id=$1
+         ))`,
+      [
+        userId,
+        chatJid,
+        accepted?.groupId ?? null,
+        accepted?.confidence ?? null,
+        accepted?.reason ?? null,
+        state.messageCount,
+      ],
+    );
   }
 
   private async persistCommitments(userId: string, commitments: readonly AiCommitment[], batchKey: string, context?: AiContext): Promise<void> {
     for (const item of commitments.filter((value) => value.confidence >= 0.7)) {
+      if (!isEvidenceDirectedToUser(context, item.evidenceMessageIds)) continue;
       if (!canExecuteCommitmentMutation(item, context)) {
         await this.database.query(
           `INSERT INTO action_proposals
@@ -1711,8 +1915,14 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
     }
   }
 
-  private async persistReminders(userId: string, reminders: readonly AiReminder[], batchKey: string): Promise<void> {
+  private async persistReminders(
+    userId: string,
+    reminders: readonly AiReminder[],
+    batchKey: string,
+    context?: AiContext,
+  ): Promise<void> {
     for (const item of reminders.filter((value) => value.confidence >= 0.7)) {
+      if (!isEvidenceDirectedToUser(context, item.evidenceMessageIds)) continue;
       const dedupe = `${batchKey}:reminder:${item.clientRef}`;
       await this.database.query(
         `WITH reminder AS (
@@ -1833,8 +2043,14 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
     }
   }
 
-  private async persistActionProposals(userId: string, proposals: readonly ActionProposal[], batchKey: string): Promise<void> {
+  private async persistActionProposals(
+    userId: string,
+    proposals: readonly ActionProposal[],
+    batchKey: string,
+    context?: AiContext,
+  ): Promise<void> {
     for (const proposal of proposals) {
+      if (!isEvidenceDirectedToUser(context, proposal.evidenceMessageIds)) continue;
       await this.database.userTransaction(userId, async (client) => {
         const alwaysForbidden = /profile|permission|recipient|external|send/i.test(proposal.kind);
         const alwaysRule = proposal.reversible && !alwaysForbidden
@@ -2723,15 +2939,32 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
   async markOutboxSent(id: number, externalMessageId: string, lockToken: string): Promise<void> {
     let userId: string | undefined;
     await this.database.transaction(async (client) => {
-      const result = await client.query<{ user_id: string }>(
+      const result = await client.query<{
+        user_id: string;
+        recipient_jid: string | null;
+        subject: string;
+        body: string;
+      }>(
         `UPDATE notification_outbox SET status='sent',sent_at=now(),external_message_id=$2,
            last_error=NULL,locked_by=NULL,locked_at=NULL
          WHERE id=$1 AND status='sending' AND locked_by=$3
-         RETURNING user_id`,
+         RETURNING user_id,recipient_jid,subject,body`,
         [id, externalMessageId, lockToken],
       );
-      userId = result.rows[0]?.user_id;
-      if (!userId) return;
+      const outbox = result.rows[0];
+      if (!outbox) return;
+      userId = outbox.user_id;
+      if (outbox.recipient_jid) {
+        await client.query(
+          `INSERT INTO platform_whatsapp_messages
+             (user_id,external_message_id,chat_jid,sender_jid,direction,body,sent_at)
+           SELECT $1,$2,$3,p.self_jid,'outbound',$4,now()
+           FROM platform_whatsapp_connection p
+           WHERE p.singleton_key='mother' AND p.self_jid IS NOT NULL
+           ON CONFLICT (external_message_id) DO NOTHING`,
+          [userId, externalMessageId, outbox.recipient_jid, `${outbox.subject}\n${outbox.body}`],
+        );
+      }
       const sent = await client.query<{
         user_id: string;
         reminder_id: string;

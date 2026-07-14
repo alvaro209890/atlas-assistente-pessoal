@@ -3,11 +3,11 @@
 ## 📋 Resumo
 
 Correção: muitos chats mostravam o **pushName** (nome que o contato definiu) ou o
-**número**, em vez do **nome salvo** na agenda do Álvaro. A causa era de prioridade
+**número**, em vez do **nome salvo** na agenda do dono. A causa era de prioridade
 no preenchimento do `display_name`.
 
 > A parte de Trello (apagar boards / consertar a aba) foi cancelada a pedido do
-> Álvaro nesta sessão — nada foi alterado no Trello nem nos boards.
+> responsável pela conta nesta sessão — nada foi alterado no Trello nem nos boards.
 
 ---
 

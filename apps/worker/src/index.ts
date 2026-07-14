@@ -117,7 +117,7 @@ async function main(): Promise<void> {
         }
         // fromMe numa conversa monitorada (não self): NÃO descarta. Persiste e
         // manda ao batch para a IA ver os DOIS lados da conversa — contexto real
-        // e compromissos que o próprio Álvaro assume ("te envio amanhã"). Cai no
+        // e compromissos que o próprio dono assume ("te envio amanhã"). Cai no
         // fluxo comum de ingestão abaixo.
       }
       if (await repository.persistMessage(message)) {
@@ -187,6 +187,17 @@ async function main(): Promise<void> {
         return;
       }
       if (await repository.isAutomationEnabled(userId, "message_ingestion")) batcher.add(message);
+      try {
+        const conversation = await repository.buildAssistantConversation(userId);
+        const answer = await deepSeek.answerAssistant(conversation);
+        const outboxId = await repository.enqueueNotification(
+          { userId, kind: "admin_message", title: "Atlas", body: answer },
+          `mother-conversation:${message.id}:reply`,
+        );
+        await boss.send(QUEUES.notification, { outboxId, attempt: 0 } satisfies NotificationJob);
+      } catch (error) {
+        logger.error({ error, userId, messageId: message.id }, "Could not answer central WhatsApp conversation");
+      }
     },
   });
 

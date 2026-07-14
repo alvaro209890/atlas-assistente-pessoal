@@ -1,5 +1,5 @@
-export const AI_SCHEMA_VERSION = "2.0" as const;
-export const AI_PROMPT_VERSION = "atlas-assistant-v2" as const;
+export const AI_SCHEMA_VERSION = "2.1" as const;
+export const AI_PROMPT_VERSION = "atlas-assistant-v2.1" as const;
 export const DEFAULT_AI_CONFIDENCE_THRESHOLD = 0.7;
 export const INFERRED_LEARNING_CONFIDENCE_THRESHOLD = 0.85;
 export const INFERRED_LEARNING_MIN_EVIDENCE = 3;

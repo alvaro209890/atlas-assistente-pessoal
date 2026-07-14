@@ -13,7 +13,7 @@ monitoramento de conversas** — que não existia fora do onboarding.
 Testei a API do DeepSeek empiricamente: **não suporta visão** (rejeita
 `image_url`: "unknown variant") **nem tem endpoint de transcrição** (`/audio/...`
 → 404). Conta só tem `deepseek-v4-flash` e `deepseek-v4-pro`, ambos texto. Por
-decisão do Álvaro (não usar API de outra IA), o recurso de áudio/imagem foi
+decisão do responsável pela conta (não usar API de outra IA), o recurso de áudio/imagem foi
 descartado por ora.
 
 ---
@@ -47,7 +47,7 @@ malformado para a forma canônica "sem resposta", em vez de rejeitar:
 
 ---
 
-## 🖥️ Nova view: Conversas monitoradas (o que o Álvaro não achava)
+## 🖥️ Nova view: Conversas monitoradas
 
 Antes só dava para escolher chats monitorados no onboarding. Agora há uma **view
 dedicada e visual** no menu principal (entre Inbox e Cérebro).

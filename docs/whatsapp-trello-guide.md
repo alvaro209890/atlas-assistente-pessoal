@@ -11,6 +11,10 @@ O Atlas separa leitura e envio em duas conexões WhatsApp:
 
 Assim, o Atlas nunca responde aos contatos que aparecem nas conversas monitoradas. Ele conversa apenas com o próprio usuário pelo número central.
 
+O workspace web não possui chat lateral de IA. A conversa pessoal com o Atlas acontece pelo WhatsApp central: mensagens recebidas do telefone identificado no QR pessoal são relacionadas à conta, respondidas com contexto e registradas no histórico central. Ordens sobre tarefas passam primeiro pelas regras determinísticas e pelo executor seguro.
+
+Em grupos monitorados, o Atlas considera menções, respostas e a identidade do dono. Mensagens destinadas a outros participantes podem contribuir para o contexto da conversa, mas não podem criar tarefas, lembretes, compromissos ou propostas para o dono da conta.
+
 ## Jornada do usuário
 
 1. A pessoa cria a conta e informa nome preferido, área de trabalho e objetivos.
@@ -29,6 +33,7 @@ Assim, o Atlas nunca responde aos contatos que aparecem nas conversas monitorada
 - **Cartão**: uma tarefa com título, prazo, membros, etiquetas, checklists e contexto.
 - **Sincronização**: tarefas canônicas ficam no PostgreSQL e são projetadas no Trello. Alterações humanas são observadas e conflitos de um mesmo campo aparecem no Inbox.
 - **Conteúdo preservado**: o Atlas altera apenas sua seção gerenciada e mantém descrições manuais fora dela.
+- **Ações no painel**: busca e filtros são locais; criar, concluir e comentar usam a API de tarefas e entram no fluxo assíncrono de sincronização; o link externo abre o cartão no Trello.
 
 O tutorial pós-conexão prepara a pessoa antes do mapeamento. A navegação do produto também apresenta título, descrição e estado selecionado visível, com `aria-current` no desktop e no celular. Filtros do Inbox, aprendizados, grafo e formatação receberam estados selecionados consistentes.
 

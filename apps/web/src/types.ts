@@ -58,6 +58,23 @@ export interface Chat {
   avatar?: string | null;
   lastMessageAt?: string | null;
   selected?: boolean;
+  group?: Pick<ChatGroup, 'id' | 'name' | 'color'> | null;
+  classification?: {
+    source: 'manual' | 'ai' | null;
+    confidence: number | null;
+    reason: string | null;
+    updatedAt: string | null;
+  };
+}
+
+export interface ChatGroup {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  system: boolean;
+  chatCount: number;
+  monitoredCount: number;
 }
 
 export interface OnboardingStatus {
@@ -119,6 +136,13 @@ export interface FocusItem {
 export type TaskStatus = 'inbox' | 'open' | 'in_progress' | 'paused' | 'completed' | 'done' | 'cancelled' | 'merged';
 export type TaskPriority = 'urgent' | 'high' | 'medium' | 'low';
 
+export interface CreateTaskInput {
+  title: string;
+  description?: string;
+  status?: 'inbox' | 'open' | 'in_progress' | 'paused' | 'done';
+  priority?: TaskPriority;
+}
+
 export interface AssistantTask {
   id: string;
   title: string;
@@ -142,7 +166,7 @@ export interface AssistantTask {
   updatedAt?: string;
 }
 
-export type TaskAction = 'complete' | 'cancel' | 'merge' | 'snooze' | 'reschedule' | 'open' | 'reopen';
+export type TaskAction = 'complete' | 'cancel' | 'merge' | 'snooze' | 'reschedule' | 'open' | 'reopen' | 'comment';
 
 export interface Reminder {
   id: string;
@@ -247,8 +271,12 @@ export interface Person {
 
 export interface TrelloCard {
   id: string;
+  externalId?: string | null;
+  taskId?: string | null;
   title: string;
   list: string;
+  listRole?: TrelloListRole | null;
+  url?: string | null;
   due?: string | null;
   labels: string[];
 }
@@ -324,6 +352,8 @@ export interface WorkspaceData {
   people: Person[];
   trelloCards: TrelloCard[];
   automations: Automation[];
+  chats?: Chat[];
+  chatGroups?: ChatGroup[];
   graph: {
     nodes: GraphNode[];
     edges: GraphEdge[];

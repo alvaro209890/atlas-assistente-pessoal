@@ -60,4 +60,20 @@ describe("buildAiContext", () => {
       metadata: { topic: "futebol" },
     });
   });
+
+  it("exposes only the allowed conversation groups and classification state", () => {
+    const context = buildAiContext({
+      now: new Date("2026-07-14T15:00:00Z"),
+      chatJid: "contact@s.whatsapp.net",
+      messages: [message("01")],
+      conversationGroups: [{ id: "group-work", name: "Trabalho", description: "Assuntos profissionais" }],
+      conversationClassification: { eligible: true, messageCount: 8, currentGroupId: null, currentSource: null },
+    });
+    const serialized = JSON.parse(serializeAiContext(context)) as {
+      conversation_groups: Array<{ id: string }>;
+      classification_state: { eligible: boolean; messageCount: number };
+    };
+    expect(serialized.conversation_groups).toEqual([{ id: "group-work", name: "Trabalho", description: "Assuntos profissionais" }]);
+    expect(serialized.classification_state).toMatchObject({ eligible: true, messageCount: 8 });
+  });
 });

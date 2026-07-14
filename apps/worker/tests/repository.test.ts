@@ -68,6 +68,24 @@ function decision(overrides: Partial<AiDecision> = {}): AiDecision {
 }
 
 describe("WorkerRepository reliability", () => {
+  it("caches contact names even when contacts arrive before chats", async () => {
+    const clientQuery = vi.fn(async () => ({ rows: [], rowCount: 1 }));
+    const query = vi.fn(async (sql: string) => sql.includes("SELECT id FROM whatsapp_connections")
+      ? { rows: [{ id: "wa-1" }], rowCount: 1 }
+      : { rows: [], rowCount: 1 });
+    const repository = new WorkerRepository({
+      query,
+      transaction: async (callback: (client: { query: typeof clientQuery }) => Promise<void>) => callback({ query: clientQuery }),
+    } as unknown as Database);
+
+    await repository.upsertContacts("user-1", [{ jid: "5511999@s.whatsapp.net", name: "João Cliente" }]);
+
+    const sql = clientQuery.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(sql).toContain("INSERT INTO whatsapp_contact_catalog");
+    expect(sql).toContain("UPDATE whatsapp_conversation_catalog");
+    expect(sql).toContain("UPDATE monitored_chats");
+  });
+
   it("loads a completed external result so downstream effects can be replayed", async () => {
     const response = {
       cardId: "card-1",
@@ -219,6 +237,32 @@ describe("WorkerRepository reliability", () => {
 });
 
 describe("WorkerRepository learning policy", () => {
+  it("persists AI grouping only for an eligible monitored conversation", async () => {
+    const query = vi.fn(async () => ({ rows: [], rowCount: 1 }));
+    const repository = new WorkerRepository({ query } as unknown as Database);
+    const context = {
+      chatJid: "contact@s.whatsapp.net",
+      conversationClassification: { eligible: true, messageCount: 8, currentGroupId: null, currentSource: null },
+    } as Parameters<WorkerRepository["persistDecisionArtifacts"]>[3];
+
+    await repository.persistDecisionArtifacts("user-1", decision({
+      conversationClassification: {
+        groupId: "55555555-5555-4555-8555-555555555555",
+        confidence: 0.9,
+        reason: "Contexto profissional recorrente.",
+        evidenceMessageIds: ["message-1"],
+      },
+    }), "batch-group", context);
+
+    const update = query.mock.calls.find((call) => String(call[0]).includes("classification_message_count"));
+    expect(String(update?.[0])).toContain("enabled=true");
+    expect(String(update?.[0])).toContain("IS DISTINCT FROM 'manual'");
+    expect(update?.[1]).toEqual([
+      "user-1", "contact@s.whatsapp.net", "55555555-5555-4555-8555-555555555555",
+      0.9, "Contexto profissional recorrente.", 8,
+    ]);
+  });
+
   it("keeps explicit high-risk instructions suggested until confirmation", async () => {
     const clientQuery = vi.fn(async (sql: string) => {
       if (sql.includes("SELECT id::text,source_type,version,state")) return { rows: [], rowCount: 0 };

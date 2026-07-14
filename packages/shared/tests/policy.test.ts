@@ -59,6 +59,30 @@ describe("task policy", () => {
     );
   });
 
+  it("does not turn group chatter assigned to someone else into the owner's task", () => {
+    const context: AiContext = {
+      now: "2026-07-14T15:00:00.000Z",
+      chatJid: "team@g.us",
+      chatName: "Equipe",
+      previousSummary: null,
+      preferences: { language: "pt-BR", timezone: "America/Sao_Paulo", replyTone: "direto", customInstructions: "", processOwnMessagesWithPrefix: "trello:" },
+      messages: [{
+        id: "m1", userId: "u1", chatJid: "team@g.us", senderJid: "manager", senderName: "Gestor",
+        sentAt: "2026-07-14T15:00:00Z", fromMe: false, text: "Maria, envie o relatório", isGroup: true,
+        mentionedJids: ["maria@s.whatsapp.net"], directedToUser: false,
+      }],
+      memories: [], corrections: [], activeLearnings: [], cardCandidates: [],
+      allowedListKeys: ["inbox"], allowedTrelloMemberIds: [], isSelfChat: false,
+      isGroupChat: true, ownerIdentity: { jids: ["owner@s.whatsapp.net"], names: ["Pessoa Usuária"] },
+    };
+    expect(classifyTask(task, 0.7, context)).toMatchObject({
+      disposition: "ignore",
+      reason: "group_message_not_directed_to_user",
+    });
+    context.messages[0] = { ...context.messages[0]!, directedToUser: true };
+    expect(classifyTask(task, 0.7, context).disposition).toBe("execute");
+  });
+
   it("rejects evidence and card IDs not supplied by context", () => {
     const decision: AiDecision = {
       schemaVersion: AI_SCHEMA_VERSION,

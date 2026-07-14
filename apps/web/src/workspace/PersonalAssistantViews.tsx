@@ -35,7 +35,7 @@ import { EmptyState } from '../components/ui';
 
 interface TaskHandlers {
   onOpenTask(id: string): void;
-  onTaskAction(id: string, input: { action: TaskAction; targetTaskId?: string; snoozeUntil?: string; dueAt?: string }): void;
+  onTaskAction(id: string, input: { action: TaskAction; targetTaskId?: string; snoozeUntil?: string; dueAt?: string; comment?: string }): void;
 }
 
 export function PersonalTodayView({ data, onOpenTask, onTaskAction, onSelectNote, onReplan, onCommitmentAction }: {
@@ -167,7 +167,7 @@ export function TaskDrawer({ task, availableTasks, onClose, onUpdate, onAction, 
   availableTasks: AssistantTask[];
   onClose(): void;
   onUpdate(id: string, input: { title?: string; description?: string }): void;
-  onAction(id: string, input: { action: TaskAction; targetTaskId?: string; snoozeUntil?: string; dueAt?: string }): void;
+  onAction(id: string, input: { action: TaskAction; targetTaskId?: string; snoozeUntil?: string; dueAt?: string; comment?: string }): void;
   onResolveConflict(id: string, resolution: 'keep_atlas' | 'keep_trello'): void;
 }) {
   const [dueAt, setDueAt] = useState('');

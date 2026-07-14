@@ -7,7 +7,7 @@ describe('CommandPalette', () => {
   it('navigates to every requested workspace surface', async () => {
     const onNavigate = vi.fn();
     const user = userEvent.setup();
-    render(<CommandPalette open activeView="today" onClose={vi.fn()} onNavigate={onNavigate} onNewNote={vi.fn()} onToggleAi={vi.fn()} />);
+    render(<CommandPalette open activeView="today" onClose={vi.fn()} onNavigate={onNavigate} onNewNote={vi.fn()} />);
 
     await user.type(screen.getByLabelText('Buscar comando'), 'cérebro');
     await user.click(screen.getByRole('option', { name: /Ir para Cérebro/i }));
@@ -17,7 +17,7 @@ describe('CommandPalette', () => {
   it('supports keyboard selection', async () => {
     const onNewNote = vi.fn();
     const user = userEvent.setup();
-    render(<CommandPalette open activeView="today" onClose={vi.fn()} onNavigate={vi.fn()} onNewNote={onNewNote} onToggleAi={vi.fn()} />);
+    render(<CommandPalette open activeView="today" onClose={vi.fn()} onNavigate={vi.fn()} onNewNote={onNewNote} />);
     const search = screen.getByLabelText('Buscar comando');
     await user.type(search, 'nova nota');
     await user.keyboard('{Enter}');

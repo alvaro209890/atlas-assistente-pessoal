@@ -356,6 +356,15 @@ export const actionProposalSchema = z
   })
   .strict();
 
+export const conversationClassificationSchema = z
+  .object({
+    groupId: z.string().trim().min(1).max(128),
+    confidence: z.number().min(0).max(1),
+    reason: z.string().trim().min(1).max(600),
+    evidenceMessageIds: z.array(z.string().trim().min(1).max(256)).min(1).max(50),
+  })
+  .strict();
+
 export const aiDecisionSchema = z
   .object({
     schemaVersion: z.literal(AI_SCHEMA_VERSION),
@@ -366,6 +375,7 @@ export const aiDecisionSchema = z
     commitments: z.array(aiCommitmentSchema).max(20).default([]),
     learnings: z.array(aiLearningSchema).max(20).default([]),
     actionProposals: z.array(actionProposalSchema).max(20).default([]),
+    conversationClassification: conversationClassificationSchema.nullable().optional(),
     memories: z.array(aiMemorySchema).max(20),
     reply: aiReplySchema,
     conversationSummary: z.string().trim().min(1).max(4_000),
@@ -378,6 +388,7 @@ export type AiReminder = z.infer<typeof aiReminderSchema>;
 export type AiCommitment = z.infer<typeof aiCommitmentSchema>;
 export type AiLearning = z.infer<typeof aiLearningSchema>;
 export type ActionProposal = z.infer<typeof actionProposalSchema>;
+export type ConversationClassification = z.infer<typeof conversationClassificationSchema>;
 export type AiMemory = z.infer<typeof aiMemorySchema>;
 export type AiReply = z.infer<typeof aiReplySchema>;
 export type AiDecision = z.infer<typeof aiDecisionSchema>;
@@ -392,6 +403,11 @@ export const normalizedMessageSchema = z
     sentAt: z.iso.datetime({ offset: true }),
     fromMe: z.boolean(),
     text: z.string().trim().min(1).max(32_000),
+    isGroup: z.boolean().optional(),
+    mentionedJids: z.array(z.string().trim().min(1).max(256)).max(100).optional(),
+    quotedParticipantJid: nullableTrimmedText(256).optional(),
+    quotedMessageId: nullableTrimmedText(256).optional(),
+    directedToUser: z.boolean().optional(),
   })
   .strict();
 
@@ -446,6 +462,25 @@ export const activeLearningSchema = z
   .strict();
 export type ActiveLearning = z.infer<typeof activeLearningSchema>;
 
+export const conversationGroupCandidateSchema = z
+  .object({
+    id: z.string().trim().min(1).max(128),
+    name: z.string().trim().min(1).max(80),
+    description: z.string().trim().max(500),
+  })
+  .strict();
+export type ConversationGroupCandidate = z.infer<typeof conversationGroupCandidateSchema>;
+
+export const conversationClassificationContextSchema = z
+  .object({
+    eligible: z.boolean(),
+    messageCount: z.number().int().min(0),
+    currentGroupId: z.string().trim().min(1).max(128).nullable(),
+    currentSource: z.enum(["manual", "ai"]).nullable(),
+  })
+  .strict();
+export type ConversationClassificationContext = z.infer<typeof conversationClassificationContextSchema>;
+
 export const aiPreferencesSchema = z
   .object({
     language: z.string().trim().min(2).max(40).default("pt-BR"),
@@ -465,11 +500,15 @@ export interface AiContext {
   previousSummary: string | null;
   preferences: AiPreferences;
   messages: NormalizedMessage[];
+  isGroupChat?: boolean;
+  ownerIdentity?: { jids: string[]; names: string[] };
   memories: KnownMemory[];
   corrections: AiCorrection[];
   activeLearnings: ActiveLearning[];
   cardCandidates: CardCandidate[];
   commitmentCandidates: CommitmentCandidate[];
+  conversationGroups?: ConversationGroupCandidate[];
+  conversationClassification?: ConversationClassificationContext;
   allowedListKeys: string[];
   allowedTrelloMemberIds: string[];
   isSelfChat: boolean;

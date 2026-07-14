@@ -7,15 +7,13 @@ import {
   Command,
   LogOut,
   Menu,
-  PanelRightOpen,
   Plus,
   Search,
   Sparkles,
   X,
 } from 'lucide-react';
 import type { AppApi } from '../api';
-import type { AssistantTask, FeedbackAction, LearningAction, Note, NavId, Session, TaskAction, WorkspaceData } from '../types';
-import { AIAssistant } from '../components/AIAssistant';
+import type { AssistantTask, CreateTaskInput, FeedbackAction, LearningAction, Note, NavId, Session, TaskAction, WorkspaceData } from '../types';
 import { CommandPalette } from '../components/CommandPalette';
 import { Avatar, Brand, ErrorState } from '../components/ui';
 import { mobileNavIds, navItems, viewMeta } from './navigation';
@@ -45,11 +43,12 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
   const [noteLoading, setNoteLoading] = useState(false);
   const [noteError, setNoteError] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [aiMobileOpen, setAiMobileOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<AssistantTask | null>(null);
+  const [conversationLoading, setConversationLoading] = useState(false);
+  const [conversationError, setConversationError] = useState<string | null>(null);
 
   const loadWorkspace = useCallback(async (background = false) => {
     if (!background) {
@@ -69,12 +68,25 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
         learnings: learnings.status === 'fulfilled' ? learnings.value : result.learnings,
         proposals: proposals.status === 'fulfilled' ? proposals.value : result.proposals,
       };
-      setData(merged);
+      setData((current) => ({ ...merged, chats: current?.chats, chatGroups: current?.chatGroups }));
       setSelectedNoteId((current) => current || result.notes[0]?.id || null);
     } catch (error) {
       if (!background) setLoadError(error instanceof Error ? error.message : 'Não foi possível carregar seu espaço.');
     } finally {
       if (!background) setLoading(false);
+    }
+  }, [api]);
+
+  const loadConversationSettings = useCallback(async () => {
+    setConversationLoading(true);
+    setConversationError(null);
+    try {
+      const [chats, chatGroups] = await Promise.all([api.listChats(), api.listChatGroups()]);
+      setData((current) => current ? { ...current, chats, chatGroups } : current);
+    } catch (error) {
+      setConversationError(error instanceof Error ? error.message : 'Não foi possível carregar as conversas.');
+    } finally {
+      setConversationLoading(false);
     }
   }, [api]);
 
@@ -105,11 +117,6 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
     navigate('brain');
   }, [navigate]);
 
-  const openAiSource = useCallback((id: string) => {
-    openNote(id);
-    setAiMobileOpen(false);
-  }, [openNote]);
-
   const loadNote = useCallback(async () => {
     if (!selectedNoteId) {
       setNote(null);
@@ -129,6 +136,12 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
   useEffect(() => {
     if (activeView === 'brain') void loadNote();
   }, [activeView, loadNote]);
+
+  useEffect(() => {
+    if (activeView === 'settings' && data && data.chats === undefined && !conversationLoading && !conversationError) {
+      void loadConversationSettings();
+    }
+  }, [activeView, conversationError, conversationLoading, data, loadConversationSettings]);
 
   const createNote = useCallback(async () => {
     try {
@@ -187,6 +200,36 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
     }
   }, [api]);
 
+  const updateChat = useCallback(async (id: string, input: { enabled?: boolean; groupId?: string | null }) => {
+    try {
+      await api.updateChat(id, input);
+      await loadConversationSettings();
+      setToast(input.enabled === true ? 'Monitoramento ativado' : input.enabled === false ? 'Monitoramento desativado' : input.groupId ? 'Grupo definido por você' : 'Atlas voltará a classificar com o tempo');
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : 'Não foi possível atualizar a conversa.');
+    }
+  }, [api, loadConversationSettings]);
+
+  const createChatGroup = useCallback(async (input: { name: string; description?: string }) => {
+    try {
+      await api.createChatGroup(input);
+      await loadConversationSettings();
+      setToast('Grupo de conversas criado');
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : 'Não foi possível criar o grupo.');
+    }
+  }, [api, loadConversationSettings]);
+
+  const deleteChatGroup = useCallback(async (id: string) => {
+    try {
+      await api.deleteChatGroup(id);
+      await loadConversationSettings();
+      setToast('Grupo removido');
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : 'Não foi possível remover o grupo.');
+    }
+  }, [api, loadConversationSettings]);
+
   const openTask = useCallback(async (id: string) => {
     const local = data?.tasks?.find((item) => item.id === id) ?? null;
     if (local) setSelectedTask(local);
@@ -206,7 +249,20 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
     }
   }, [api]);
 
-  const runTaskAction = useCallback(async (id: string, input: { action: TaskAction; targetTaskId?: string; snoozeUntil?: string; dueAt?: string }) => {
+  const createTask = useCallback(async (input: CreateTaskInput) => {
+    try {
+      const created = await api.createTask(input);
+      setData((current) => current ? { ...current, tasks: [created, ...(current.tasks ?? [])] } : current);
+      setToast('Tarefa criada e enviada para sincronização com o Trello');
+      await loadWorkspace(true);
+      return created;
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : 'Não foi possível criar a tarefa.');
+      throw error;
+    }
+  }, [api, loadWorkspace]);
+
+  const runTaskAction = useCallback(async (id: string, input: { action: TaskAction; targetTaskId?: string; snoozeUntil?: string; dueAt?: string; comment?: string }) => {
     try {
       const updated = await api.runTaskAction(id, input);
       if (input.action === 'merge') await api.sendFeedback({ itemId: id, action: 'merge', context: 'inbox' });
@@ -216,10 +272,11 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
         focus: ['complete', 'cancel', 'merge'].includes(input.action) ? current.focus.filter((item) => item.id !== id) : current.focus,
       } : current);
       setSelectedTask((current) => current?.id === id ? updated : current);
-      setToast(input.action === 'complete' ? 'Tarefa concluída' : input.action === 'cancel' ? 'Tarefa cancelada' : input.action === 'merge' ? 'Tarefas mescladas' : input.action === 'snooze' ? 'Tarefa adiada para amanhã' : input.action === 'reschedule' ? 'Novo prazo salvo' : 'Tarefa atualizada');
+      setToast(input.action === 'complete' ? 'Tarefa concluída' : input.action === 'cancel' ? 'Tarefa cancelada' : input.action === 'merge' ? 'Tarefas mescladas' : input.action === 'snooze' ? 'Tarefa adiada para amanhã' : input.action === 'reschedule' ? 'Novo prazo salvo' : input.action === 'comment' ? 'Comentário enviado ao Trello' : 'Tarefa atualizada');
+      await loadWorkspace(true);
       if (['complete', 'cancel', 'merge'].includes(input.action)) window.setTimeout(() => setSelectedTask((current) => current?.id === id ? null : current), 450);
     } catch (error) { setToast(error instanceof Error ? error.message : 'Não foi possível atualizar a tarefa.'); }
-  }, [api]);
+  }, [api, loadWorkspace]);
 
   const resolveTaskConflict = useCallback(async (id: string, resolution: 'keep_atlas' | 'keep_trello') => {
     try {
@@ -296,7 +353,6 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
       }
       if (event.key === 'Escape') {
         setPaletteOpen(false);
-        setAiMobileOpen(false);
         setMobileMenuOpen(false);
       }
     };
@@ -345,7 +401,6 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
             <button className="topbar-search" type="button" onClick={() => setPaletteOpen(true)}><Search size={15} /><span>Busque notas, pessoas ou projetos…</span><kbd>⌘ K</kbd></button>
             <div className="topbar__actions">
               <button className="icon-button" type="button" aria-label="Notificações"><Bell size={17} /><i /></button>
-              <button className="icon-button topbar-ai-button" type="button" onClick={() => setAiMobileOpen(true)} aria-label="Abrir assistente"><PanelRightOpen size={18} /></button>
               <button className="button button--primary button--small topbar-new-note" type="button" onClick={() => void createNote()}><Plus size={15} /> Nova nota</button>
               <Avatar name={displayName} size="small" />
             </div>
@@ -366,6 +421,14 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
                 onRetryNote={() => void loadNote()}
                 onToggleAutomation={(id, enabled) => void toggleAutomation(id, enabled)}
                 onUpdateSettings={(input) => void updateSettings(input)}
+                conversationLoading={conversationLoading}
+                conversationError={conversationError}
+                onRefreshConversations={() => void loadConversationSettings()}
+                onUpdateChat={(id, input) => void updateChat(id, input)}
+                onCreateChatGroup={(input) => void createChatGroup(input)}
+                onDeleteChatGroup={(id) => void deleteChatGroup(id)}
+                 onCreateTask={createTask}
+                 onRefreshWorkspace={() => void loadWorkspace()}
                  onFeedback={(itemId, action, context) => void sendFeedback(itemId, action, context)}
                  onOpenTask={(id) => void openTask(id)}
                  onTaskAction={(id, input) => void runTaskAction(id, input)}
@@ -382,8 +445,6 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
           </div>
         </section>
 
-        <AIAssistant api={api} view={activeView} noteId={selectedNoteId} tasks={data?.tasks ?? []} mobileOpen={aiMobileOpen} onMobileClose={() => setAiMobileOpen(false)} onOpenNote={openAiSource} />
-        {aiMobileOpen && <button type="button" className="mobile-overlay" onClick={() => setAiMobileOpen(false)} aria-label="Fechar assistente" />}
       </div>
 
       <TaskDrawer
@@ -406,7 +467,7 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
 
       {mobileMenuOpen && <div className="mobile-sheet-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setMobileMenuOpen(false)}><section className="mobile-sheet"><header><strong>Mais opções</strong><button type="button" onClick={() => setMobileMenuOpen(false)} aria-label="Fechar menu"><X size={18} /></button></header>{navItems.filter((item) => !mobileNavIds.includes(item.id)).map((item) => { const Icon = item.icon; return <button type="button" key={item.id} aria-current={activeView === item.id ? 'page' : undefined} className={activeView === item.id ? 'is-active' : ''} onClick={() => navigate(item.id)}><span className="mobile-sheet__icon"><Icon size={18} /></span><span><strong>{item.label}</strong><small>{item.description}</small></span><ChevronDown size={14} /></button>; })}</section></div>}
 
-      <CommandPalette open={paletteOpen} activeView={activeView} onClose={() => setPaletteOpen(false)} onNavigate={navigate} onNewNote={() => void createNote()} onToggleAi={() => setAiMobileOpen(true)} />
+      <CommandPalette open={paletteOpen} activeView={activeView} onClose={() => setPaletteOpen(false)} onNavigate={navigate} onNewNote={() => void createNote()} />
       {toast && <div className="toast" role="status"><Check size={14} /> {toast}</div>}
     </main>
   );

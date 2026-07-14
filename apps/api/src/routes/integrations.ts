@@ -28,6 +28,28 @@ interface WhatsAppRow {
   updated_at: Date | string;
 }
 
+interface ConversationGroupRow {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  is_system: boolean;
+  chat_count: number;
+  monitored_count: number;
+}
+
+function conversationGroupJson(row: ConversationGroupRow) {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    color: row.color,
+    system: row.is_system,
+    chatCount: Number(row.chat_count),
+    monitoredCount: Number(row.monitored_count),
+  };
+}
+
 export function frontendWhatsappStatus(status: string, hasQr = false) {
   return status === 'pairing'
     ? (hasQr ? 'qr' : 'connecting')
@@ -178,6 +200,93 @@ export async function registerIntegrationRoutes(app: FastifyInstance, deps: Inte
     return reply.status(204).send();
   });
 
+  app.get('/whatsapp/chat-groups', async (request) => {
+    const user = currentUser(request);
+    const result = await database.query<ConversationGroupRow>(
+      `SELECT cg.id,cg.name,cg.description,cg.color,cg.is_system,
+              count(mc.id)::int AS chat_count,
+              count(mc.id) FILTER (WHERE mc.enabled)::int AS monitored_count
+       FROM conversation_groups cg
+       LEFT JOIN monitored_chats mc ON mc.user_id=cg.user_id AND mc.conversation_group_id=cg.id
+       WHERE cg.user_id=$1
+       GROUP BY cg.id
+       ORDER BY cg.sort_order,cg.name`,
+      [user.id],
+    );
+    return result.rows.map(conversationGroupJson);
+  });
+
+  app.post('/whatsapp/chat-groups', async (request, reply) => {
+    const user = currentUser(request);
+    const input = parseInput(z.object({
+      name: z.string().trim().min(1).max(80),
+      description: z.string().trim().max(500).default(''),
+      color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).default('#7C5CFF'),
+    }), request.body);
+    const result = await database.query<ConversationGroupRow>(
+      `INSERT INTO conversation_groups (user_id,name,description,color,is_system,sort_order)
+       VALUES ($1,$2,$3,upper($4),false,100)
+       ON CONFLICT DO NOTHING
+       RETURNING id,name,description,color,is_system,0::int AS chat_count,0::int AS monitored_count`,
+      [user.id, input.name, input.description, input.color],
+    );
+    if (!result.rows[0]) throw new AppError(409, 'CHAT_GROUP_EXISTS', 'Já existe um grupo de conversas com esse nome.');
+    await events.publish(user.id, 'whatsapp.chat-group.created', { groupId: result.rows[0].id }, 'whatsapp');
+    return reply.status(201).send(conversationGroupJson(result.rows[0]));
+  });
+
+  app.patch('/whatsapp/chat-groups/:id', async (request) => {
+    const user = currentUser(request);
+    const { id } = parseInput(uuidParams, request.params);
+    const input = parseInput(z.object({
+      name: z.string().trim().min(1).max(80).optional(),
+      description: z.string().trim().max(500).optional(),
+      color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+    }).refine((value) => Object.values(value).some((item) => item !== undefined), 'Informe ao menos uma alteração.'), request.body);
+    const duplicate = input.name ? await database.query(
+      `SELECT 1 FROM conversation_groups WHERE user_id=$1 AND id<>$2 AND lower(btrim(name))=lower(btrim($3)) LIMIT 1`,
+      [user.id, id, input.name],
+    ) : null;
+    if (duplicate?.rows[0]) throw new AppError(409, 'CHAT_GROUP_EXISTS', 'Já existe um grupo de conversas com esse nome.');
+    const result = await database.query<ConversationGroupRow>(
+      `WITH updated AS (
+         UPDATE conversation_groups SET name=COALESCE($3,name),description=COALESCE($4,description),
+           color=COALESCE(upper($5),color)
+         WHERE id=$1 AND user_id=$2
+         RETURNING id,name,description,color,is_system
+       )
+       SELECT updated.*,
+         (SELECT count(*)::int FROM monitored_chats WHERE user_id=$2 AND conversation_group_id=$1) AS chat_count,
+         (SELECT count(*)::int FROM monitored_chats WHERE user_id=$2 AND conversation_group_id=$1 AND enabled) AS monitored_count
+       FROM updated`,
+      [id, user.id, input.name ?? null, input.description ?? null, input.color ?? null],
+    );
+    if (!result.rows[0]) throw new AppError(404, 'CHAT_GROUP_NOT_FOUND', 'Grupo de conversas não encontrado.');
+    await events.publish(user.id, 'whatsapp.chat-group.updated', { groupId: id }, 'whatsapp');
+    return conversationGroupJson(result.rows[0]);
+  });
+
+  app.delete('/whatsapp/chat-groups/:id', async (request, reply) => {
+    const user = currentUser(request);
+    const { id } = parseInput(uuidParams, request.params);
+    await database.userTransaction(user.id, async (client) => {
+      const group = await client.query<{ is_system: boolean }>(
+        'SELECT is_system FROM conversation_groups WHERE id=$1 AND user_id=$2 FOR UPDATE', [id, user.id],
+      );
+      if (!group.rows[0]) throw new AppError(404, 'CHAT_GROUP_NOT_FOUND', 'Grupo de conversas não encontrado.');
+      if (group.rows[0].is_system) throw new AppError(409, 'SYSTEM_CHAT_GROUP', 'Os grupos padrão podem ser editados, mas não excluídos.');
+      await client.query(
+        `UPDATE monitored_chats SET conversation_group_id=NULL,group_assignment_source=NULL,
+           group_confidence=NULL,group_reason=NULL,group_last_classified_at=NULL,classification_message_count=0
+         WHERE user_id=$1 AND conversation_group_id=$2`,
+        [user.id, id],
+      );
+      await client.query('DELETE FROM conversation_groups WHERE id=$1 AND user_id=$2', [id, user.id]);
+    });
+    await events.publish(user.id, 'whatsapp.chat-group.deleted', { groupId: id }, 'whatsapp');
+    return reply.status(204).send();
+  });
+
   app.get('/whatsapp/chats', async (request) => {
     const user = currentUser(request);
     const query = parseInput(z.object({ connectionId: z.string().uuid().optional() }), request.query);
@@ -196,41 +305,101 @@ export async function registerIntegrationRoutes(app: FastifyInstance, deps: Inte
     catch (error) { request.log.warn({ err: error }, 'could not list remote chats'); }
     if (remote.length) {
       for (const chat of remote) {
+        const remoteName = chat.name?.trim();
+        const looksLikePhone = remoteName ? /^\+?[\d\s()-]{7,}$/.test(remoteName) : false;
+        const stableName = remoteName && remoteName !== chat.jid && !remoteName.includes('@') && !looksLikePhone ? remoteName : '';
         await database.query(
           `INSERT INTO monitored_chats (user_id,whatsapp_connection_id,jid,display_name,is_group,enabled,metadata)
            VALUES ($1,$2,$3,$4,$5,false,$6)
            ON CONFLICT (user_id,whatsapp_connection_id,jid)
-           DO UPDATE SET display_name=EXCLUDED.display_name,is_group=EXCLUDED.is_group,metadata=monitored_chats.metadata || EXCLUDED.metadata`,
-          [user.id, connectionId, chat.jid, chat.name, chat.isGroup, { lastMessageAt: chat.lastMessageAt ?? null }],
+           DO UPDATE SET display_name=CASE WHEN EXCLUDED.display_name<>'' THEN EXCLUDED.display_name ELSE monitored_chats.display_name END,
+             is_group=EXCLUDED.is_group,metadata=monitored_chats.metadata || EXCLUDED.metadata`,
+          [user.id, connectionId, chat.jid, stableName, chat.isGroup, { lastMessageAt: chat.lastMessageAt ?? null }],
         );
       }
     }
     const result = await database.query<{
       id: string; display_name: string; is_group: boolean; enabled: boolean; metadata: { lastMessageAt?: string };
+      group_id: string | null; group_name: string | null; group_color: string | null;
+      group_assignment_source: 'manual' | 'ai' | null; group_confidence: number | null;
+      group_reason: string | null; group_last_classified_at: Date | string | null;
     }>(
-      `SELECT id,display_name,is_group,enabled,metadata FROM monitored_chats
-       WHERE user_id=$1 AND whatsapp_connection_id=$2
-         AND (jid LIKE '%@g.us' OR jid LIKE '%@s.whatsapp.net')
-       ORDER BY (display_name <> '') DESC, is_group DESC, display_name`, [user.id, connectionId],
+      `SELECT mc.id,
+              COALESCE(NULLIF(mc.display_name,''),NULLIF(cc.display_name,''),regexp_replace(mc.jid,'@.*$','')) AS display_name,
+              mc.is_group,mc.enabled,mc.metadata,cg.id AS group_id,cg.name AS group_name,cg.color AS group_color,
+              mc.group_assignment_source,mc.group_confidence::float,mc.group_reason,mc.group_last_classified_at
+       FROM monitored_chats mc
+       LEFT JOIN whatsapp_contact_catalog cc ON cc.user_id=mc.user_id
+         AND cc.whatsapp_connection_id=mc.whatsapp_connection_id AND cc.jid=mc.jid
+       LEFT JOIN conversation_groups cg ON cg.user_id=mc.user_id AND cg.id=mc.conversation_group_id
+       WHERE mc.user_id=$1 AND mc.whatsapp_connection_id=$2
+         AND (mc.jid LIKE '%@g.us' OR mc.jid LIKE '%@s.whatsapp.net')
+       ORDER BY lower(COALESCE(NULLIF(mc.display_name,''),NULLIF(cc.display_name,''),mc.jid))`, [user.id, connectionId],
     );
     return result.rows.map((row) => ({
       id: row.id, name: row.display_name, kind: row.is_group ? 'group' : 'direct',
       lastMessageAt: row.metadata.lastMessageAt ?? null, selected: row.enabled,
+      group: row.group_id ? { id: row.group_id, name: row.group_name!, color: row.group_color! } : null,
+      classification: {
+        source: row.group_assignment_source,
+        confidence: row.group_confidence,
+        reason: row.group_reason,
+        updatedAt: row.group_last_classified_at ? new Date(row.group_last_classified_at).toISOString() : null,
+      },
     }));
   });
 
   app.patch('/whatsapp/chats/:id', async (request) => {
     const user = currentUser(request);
     const { id } = parseInput(uuidParams, request.params);
-    const input = parseInput(z.object({ enabled: z.boolean(), displayName: z.string().trim().min(1).max(160).optional() }), request.body);
-    const result = await database.query(
-      `UPDATE monitored_chats SET enabled=$3,display_name=COALESCE($4,display_name)
-       WHERE id=$1 AND user_id=$2 RETURNING id,enabled,display_name AS "displayName"`,
-      [id, user.id, input.enabled, input.displayName ?? null],
-    );
-    if (!result.rows[0]) throw new AppError(404, 'CHAT_NOT_FOUND', 'Conversa não encontrada.');
-    await events.publish(user.id, 'whatsapp.chat.updated', { chatId: id, enabled: input.enabled }, 'whatsapp');
-    return result.rows[0];
+    const input = parseInput(z.object({
+      enabled: z.boolean().optional(),
+      displayName: z.string().trim().min(1).max(160).optional(),
+      groupId: z.string().uuid().nullable().optional(),
+    }).refine((value) => Object.values(value).some((item) => item !== undefined), 'Informe ao menos uma alteração.'), request.body);
+    const result = await database.userTransaction(user.id, async (client) => {
+      const owned = await client.query('SELECT 1 FROM monitored_chats WHERE id=$1 AND user_id=$2 FOR UPDATE', [id, user.id]);
+      if (!owned.rows[0]) throw new AppError(404, 'CHAT_NOT_FOUND', 'Conversa não encontrada.');
+      if (input.groupId) {
+        const group = await client.query('SELECT 1 FROM conversation_groups WHERE id=$1 AND user_id=$2', [input.groupId, user.id]);
+        if (!group.rows[0]) throw new AppError(422, 'CHAT_GROUP_INVALID', 'O grupo escolhido não pertence a esta conta.');
+      }
+      const changesGroup = input.groupId !== undefined;
+      await client.query(
+        `UPDATE monitored_chats SET
+           enabled=CASE WHEN $3 THEN $4 ELSE enabled END,
+           display_name=CASE WHEN $5 THEN $6 ELSE display_name END,
+           conversation_group_id=CASE WHEN $7 THEN $8::uuid ELSE conversation_group_id END,
+           group_assignment_source=CASE WHEN $7 THEN CASE WHEN $8::uuid IS NULL THEN NULL ELSE 'manual' END ELSE group_assignment_source END,
+           group_confidence=CASE WHEN $7 THEN NULL ELSE group_confidence END,
+           group_reason=CASE WHEN $7 THEN NULL ELSE group_reason END,
+           group_last_classified_at=CASE WHEN $7 THEN NULL ELSE group_last_classified_at END,
+           classification_message_count=CASE WHEN $7 THEN 0 ELSE classification_message_count END
+         WHERE id=$1 AND user_id=$2`,
+        [id, user.id, input.enabled !== undefined, input.enabled ?? false,
+          input.displayName !== undefined, input.displayName ?? '', changesGroup, input.groupId ?? null],
+      );
+      return client.query<{
+        id: string; enabled: boolean; display_name: string; group_id: string | null;
+        group_name: string | null; group_color: string | null; group_assignment_source: 'manual' | 'ai' | null;
+        group_confidence: number | null; group_reason: string | null; group_last_classified_at: Date | string | null;
+      }>(
+        `SELECT mc.id,mc.enabled,mc.display_name,cg.id AS group_id,cg.name AS group_name,cg.color AS group_color,
+                mc.group_assignment_source,mc.group_confidence::float,mc.group_reason,mc.group_last_classified_at
+         FROM monitored_chats mc LEFT JOIN conversation_groups cg ON cg.id=mc.conversation_group_id AND cg.user_id=mc.user_id
+         WHERE mc.id=$1 AND mc.user_id=$2`, [id, user.id],
+      );
+    });
+    const row = result.rows[0]!;
+    await events.publish(user.id, 'whatsapp.chat.updated', { chatId: id, enabled: row.enabled, groupId: row.group_id }, 'whatsapp');
+    return {
+      id: row.id, selected: row.enabled, name: row.display_name,
+      group: row.group_id ? { id: row.group_id, name: row.group_name!, color: row.group_color! } : null,
+      classification: {
+        source: row.group_assignment_source, confidence: row.group_confidence, reason: row.group_reason,
+        updatedAt: row.group_last_classified_at ? new Date(row.group_last_classified_at).toISOString() : null,
+      },
+    };
   });
 
   app.post('/whatsapp/chats/monitor-all', async (request) => {

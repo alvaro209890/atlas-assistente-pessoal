@@ -20,7 +20,19 @@ const normalize = (value: string) =>
 export function parseAtlasSelfCommand(text: string): AtlasSelfCommand | null {
   const raw = text.trim();
   const value = normalize(raw).replace(/^atlas[:,]?\s*/, "");
-  const complete = value.match(/^(?:feito|conclui(?:do)?|finalizei)(?:\s+(.+))?$/);
+  const taskStatusComplete = value.match(/^(?:a\s+)?tarefa\s+(.+?)\s+(?:esta|ta|foi)\s+(?:concluida?|finalizada?|pronta?)$/);
+  if (taskStatusComplete) {
+    return { kind: "complete", raw, reference: taskStatusComplete[1]?.trim() ?? null, durationMinutes: null, localTime: null };
+  }
+  const markComplete = value.match(/^(?:marque|marca)\s+(?:a\s+tarefa\s+)?(.+?)\s+como\s+(?:concluida?|finalizada?|pronta?)$/);
+  if (markComplete) {
+    return { kind: "complete", raw, reference: markComplete[1]?.trim() ?? null, durationMinutes: null, localTime: null };
+  }
+  const imperativeComplete = value.match(/^(?:conclua|complete|finalize)\s+(?:a\s+tarefa\s+)?(.+)$/);
+  if (imperativeComplete) {
+    return { kind: "complete", raw, reference: imperativeComplete[1]?.trim() ?? null, durationMinutes: null, localTime: null };
+  }
+  const complete = value.match(/^(?:feito|conclui(?:do)?|finalizei|terminei)(?:\s+(.+))?$/);
   if (complete) return { kind: "complete", raw, reference: complete[1]?.trim() ?? null, durationMinutes: null, localTime: null };
 
   const snooze = value.match(/^(?:adiar|lembre(?:-me)?\s+depois|soneca)(?:\s+(?:por\s+)?)?(\d+)\s*(m|min|minutos?|h|horas?)(?:\s+(.+))?$/);
@@ -59,6 +71,10 @@ export const ATLAS_SELF_COMMAND_EVALUATION_CORPUS: readonly AtlasSelfCommandEval
   { id: "complete-02", text: "concluído relatório mensal", expectedKind: "complete" },
   { id: "complete-03", text: "finalizei proposta Aurora", expectedKind: "complete" },
   { id: "complete-04", text: "Atlas: feito contrato", expectedKind: "complete" },
+  { id: "complete-05", text: "a tarefa relatório mensal tá concluída", expectedKind: "complete" },
+  { id: "complete-06", text: "marque proposta Aurora como concluída", expectedKind: "complete" },
+  { id: "complete-07", text: "conclua a tarefa orçamento da Ana", expectedKind: "complete" },
+  { id: "complete-08", text: "terminei vistoria da fazenda", expectedKind: "complete" },
   { id: "snooze-01", text: "adiar 1h", expectedKind: "snooze" },
   { id: "snooze-02", text: "adiar por 30 minutos orçamento", expectedKind: "snooze" },
   { id: "snooze-03", text: "lembre-me depois 2 horas vistoria", expectedKind: "snooze" },

@@ -120,6 +120,25 @@ describe('API mode boundaries', () => {
     });
   });
 
+  it('uses tenant chat-group endpoints and sends explicit monitoring changes', async () => {
+    const chatId = '55555555-5555-4555-8555-555555555555';
+    const groupId = '66666666-6666-4666-8666-666666666666';
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/whatsapp/chat-groups') return jsonResponse([{ id: groupId, name: 'Trabalho', description: '', color: '#7C5CFF', system: true, chatCount: 1, monitoredCount: 1 }]);
+      if (url === `/api/whatsapp/chats/${chatId}`) return jsonResponse({ id: chatId, selected: true });
+      return jsonResponse({ message: `Unexpected ${url}` }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const api = createApi(false);
+
+    await expect(api.listChatGroups()).resolves.toMatchObject([{ id: groupId, name: 'Trabalho' }]);
+    await api.updateChat(chatId, { enabled: true, groupId });
+
+    expect(fetchMock).toHaveBeenCalledWith(`/api/whatsapp/chats/${chatId}`, expect.objectContaining({
+      method: 'PATCH', body: JSON.stringify({ enabled: true, groupId }),
+    }));
+  });
+
   it('resolves a Trello conflict explicitly and normalizes its sync state', async () => {
     const taskId = '55555555-5555-4555-8555-555555555555';
     const fetchMock = vi.fn(() => jsonResponse({

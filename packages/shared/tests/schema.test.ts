@@ -105,6 +105,19 @@ describe("aiDecisionSchema", () => {
     const parsed = aiDecisionSchema.parse(validDecision);
     expect(parsed.reply).toMatchObject({ needed: true, objective: "acknowledge", draft: "Recebi. Envio amanhã." });
   });
+
+  it("accepts a confidence-scored conversation classification", () => {
+    const classified = {
+      ...validDecision,
+      conversationClassification: {
+        groupId: "group-work",
+        confidence: 0.91,
+        reason: "As mensagens tratam de clientes e entregas.",
+        evidenceMessageIds: ["msg-1"],
+      },
+    };
+    expect(aiDecisionSchema.parse(classified).conversationClassification).toMatchObject({ groupId: "group-work", confidence: 0.91 });
+  });
 });
 
 describe("aiCorrectionSchema", () => {

@@ -22,6 +22,8 @@ describe("Atlas self commands", () => {
     ["silenciar tarefa 42", "silence"],
     ["abrir orçamento", "open"],
     ["por quê tarefa urgente?", "explain"],
+    ["a tarefa relatório mensal tá concluída", "complete"],
+    ["marque proposta Aurora como concluída", "complete"],
   ])("parses %s", (input, kind) => {
     expect(parseAtlasSelfCommand(input)?.kind).toBe(kind);
   });

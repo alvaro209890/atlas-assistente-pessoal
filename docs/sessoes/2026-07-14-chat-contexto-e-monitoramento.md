@@ -2,13 +2,13 @@
 
 ## 📋 Resumo
 
-Quatro frentes pedidas pelo Álvaro: (1) chat lateral persistente e mais completo,
-(2) a IA passar a ver as mensagens que o próprio Álvaro envia (contexto dos dois
+Quatro frentes pedidas pelo responsável pela conta: (1) chat lateral persistente e mais completo,
+(2) a IA passar a ver as mensagens que o próprio dono envia (contexto dos dois
 lados), (3) corte da parte inferior do front em zoom/escala > 100%, (4) a lista de
-conversas do Álvaro estava poluída de `@lid` (participantes de grupo) em vez de só
+conversas do dono estava poluída de `@lid` (participantes de grupo) em vez de só
 grupos + diretos.
 
-> Nota: multimídia (áudio/imagem) ficou de fora — o DeepSeek é só texto e o Álvaro
+> Nota: multimídia (áudio/imagem) ficou de fora — o DeepSeek é só texto e o responsável
 > não quer usar API de outra IA.
 
 ---
@@ -26,14 +26,14 @@ tudo (embora o backend já persista em `brain_chat_threads`/`brain_chat_messages
 
 ## 2) IA com contexto dos DOIS lados da conversa
 
-As mensagens `fromMe` (que o Álvaro envia) eram descartadas em dois pontos:
+As mensagens `fromMe` (que o dono envia) eram descartadas em dois pontos:
 
 - **Worker** (`apps/worker/src/index.ts`): `fromMe` em conversa monitorada (não
   self-chat) caía num `return`. Agora é persistida e entra no batch de triage.
 - **Contexto** (`packages/shared/src/context.ts`): `buildAiContext` só incluía
   `fromMe` se começasse com `"trello:"`. Agora **sempre** inclui — o campo
   `from_me` diz à IA quem falou. Assim ela entende o diálogo completo e detecta
-  compromissos que o próprio Álvaro assume ("te envio amanhã").
+  compromissos que o próprio dono assume ("te envio amanhã").
 
 ## 3) Corte da parte inferior do front (zoom/escala > 100%)
 
@@ -47,7 +47,7 @@ Causa: containers flex de rolagem sem `min-height: 0`. Em telas mais baixas o
 
 ## 4) Lista de conversas: só grupos + diretos (sem `@lid`)
 
-A conta do Álvaro tinha 854 "chats", mas 149 eram `@lid` (participantes de grupo /
+A conta auditada tinha 854 "chats", mas 149 eram `@lid` (participantes de grupo /
 modo privacidade) — não são conversas. O monitorável deve ser **grupo (`@g.us`)**
 ou **direto (`@s.whatsapp.net`)**.
 
@@ -69,6 +69,6 @@ ou **direto (`@s.whatsapp.net`)**.
 - Serviços reiniciados sem erros; health 200; público serve o novo bundle.
 - QA visual (preview): botão "+" no chat, layout íntegro, view Conversas.
 
-> Como as mensagens `fromMe` e a limpeza afetam dados do Álvaro em produção: as
+> Como as mensagens `fromMe` e a limpeza afetam dados da conta em produção: as
 > mensagens novas passam a ser processadas com os dois lados; a lista de conversas
 > agora mostra só grupos + diretos.

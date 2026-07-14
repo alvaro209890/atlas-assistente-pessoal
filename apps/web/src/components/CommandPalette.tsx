@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { Bot, Command, FilePlus2, PanelRightOpen, Search } from 'lucide-react';
+import { Bot, Command, FilePlus2, Search } from 'lucide-react';
 import type { NavId } from '../types';
 import { navItems } from '../workspace/navigation';
 
@@ -9,7 +9,6 @@ interface CommandPaletteProps {
   onClose(): void;
   onNavigate(view: NavId): void;
   onNewNote(): void;
-  onToggleAi(): void;
 }
 
 type PaletteCommand = {
@@ -21,14 +20,13 @@ type PaletteCommand = {
   keywords: string;
 };
 
-export function CommandPalette({ open, activeView, onClose, onNavigate, onNewNote, onToggleAi }: CommandPaletteProps) {
+export function CommandPalette({ open, activeView, onClose, onNavigate, onNewNote }: CommandPaletteProps) {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const commands = useMemo<PaletteCommand[]>(() => [
     { id: 'new-note', label: 'Criar nova nota', hint: 'N', icon: FilePlus2, action: onNewNote, keywords: 'nova nota escrever capturar' },
-    { id: 'toggle-ai', label: 'Abrir assistente Atlas', hint: 'A', icon: PanelRightOpen, action: onToggleAi, keywords: 'ia inteligência assistente painel' },
     ...navItems.map((item) => ({
       id: `go-${item.id}`,
       label: `Ir para ${item.label}`,
@@ -37,7 +35,7 @@ export function CommandPalette({ open, activeView, onClose, onNavigate, onNewNot
       action: () => onNavigate(item.id),
       keywords: `${item.label} navegar abrir ${item.id}`,
     })),
-  ], [onNavigate, onNewNote, onToggleAi]);
+  ], [onNavigate, onNewNote]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase('pt-BR');

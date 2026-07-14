@@ -83,5 +83,54 @@ describe('Workspace live updates', () => {
     fireEvent.click(trello);
     expect(trello).toHaveAttribute('aria-current', 'page');
     expect(today).not.toHaveAttribute('aria-current');
+    expect(screen.queryByLabelText('Abrir assistente')).not.toBeInTheDocument();
+  });
+
+  it('executes Trello card actions instead of rendering inert controls', async () => {
+    window.location.hash = '';
+    const api = createApi(true);
+    api.getWorkspace = vi.fn(async () => cloneWorkspace());
+    api.runTaskAction = vi.fn(async () => ({ ...demoWorkspace.tasks![0]!, status: 'done' as const }));
+
+    render(
+      <Workspace
+        api={api}
+        session={demoSession}
+        onLogout={vi.fn(async () => undefined)}
+        onEnterPreview={vi.fn()}
+        onExitPreview={vi.fn()}
+      />,
+    );
+
+    await screen.findByText(demoWorkspace.briefing);
+    fireEvent.click(screen.getByRole('button', { name: /TrelloQuadro sincronizado/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Ações de Revisar apresentação final/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Concluir tarefa' }));
+    await waitFor(() => expect(api.runTaskAction).toHaveBeenCalledWith('focus-1', { action: 'complete' }));
+  });
+
+  it('lets the user review monitored conversations and their groups in settings', async () => {
+    window.location.hash = '';
+    const api = createApi(true);
+    api.getWorkspace = vi.fn(async () => cloneWorkspace());
+
+    render(
+      <Workspace
+        api={api}
+        session={demoSession}
+        onLogout={vi.fn(async () => undefined)}
+        onEnterPreview={vi.fn()}
+        onExitPreview={vi.fn()}
+      />,
+    );
+
+    await screen.findByText(demoWorkspace.briefing);
+    fireEvent.click(screen.getByRole('button', { name: /ConfiguraçõesConta e integrações/ }));
+    expect(await screen.findByText('Conversas monitoradas')).toBeInTheDocument();
+    expect(await screen.findByText('Lucas Mendes')).toBeInTheDocument();
+    expect(screen.getByText(/Ignorada · a IA não lê nem classifica/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Novo grupo' })).toBeInTheDocument();
+    expect(screen.getByText('3 conversas acompanhadas')).toBeInTheDocument();
+    expect(screen.getByText('3 conversas autorizadas. Todo o restante é ignorado.')).toBeInTheDocument();
   });
 });

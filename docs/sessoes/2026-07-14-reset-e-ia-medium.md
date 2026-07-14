@@ -108,7 +108,7 @@ O `DEEPSEEK_API_KEY` no `.env` retorna **HTTP 401** na API oficial:
 
 A IA está corretamente configurada (modelo + raciocínio médio), mas **não
 responderá** até a chave ser substituída por uma válida no `.env` e o
-`atlas-api` + `atlas-worker` serem reiniciados. Ação do Álvaro:
+`atlas-api` + `atlas-worker` serem reiniciados. Ação do operador:
 
 ```bash
 # editar DEEPSEEK_API_KEY em ~/Documentos/atlas-assistente-pessoal/.env

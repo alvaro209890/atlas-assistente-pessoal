@@ -1,4 +1,4 @@
-import { demoChats, demoNotes, demoOnboarding, demoSession, demoWorkspace } from './demo';
+import { demoChatGroups, demoChats, demoNotes, demoOnboarding, demoSession, demoWorkspace } from './demo';
 import type {
   ActionProposal,
   AssistantLearning,
@@ -11,7 +11,9 @@ import type {
   AuthInput,
   Chat,
   ChatThreadSummary,
+  ChatGroup,
   Commitment,
+  CreateTaskInput,
   FeedbackAction,
   LearningAction,
   LearningEvidence,
@@ -57,14 +59,19 @@ export interface AppApi {
   selectTrelloBoard(boardId: string): Promise<TrelloSetup>;
   saveTrelloMapping(input: { boardId: string; mapping: Record<TrelloListRole, string> }): Promise<TrelloSetup>;
   listChats(): Promise<Chat[]>;
-  updateChat(id: string, enabled: boolean): Promise<{ id: string; enabled: boolean }>;
+  updateChat(id: string, input: boolean | { enabled?: boolean; groupId?: string | null; displayName?: string }): Promise<Partial<Chat> & Pick<Chat, 'id'>>;
   setAllChatsMonitored(enabled: boolean): Promise<{ updated: number }>;
+  listChatGroups(): Promise<ChatGroup[]>;
+  createChatGroup(input: { name: string; description?: string; color?: string }): Promise<ChatGroup>;
+  updateChatGroup(id: string, input: { name?: string; description?: string; color?: string }): Promise<ChatGroup>;
+  deleteChatGroup(id: string): Promise<void>;
   completeOnboarding(input: { selectedChatIds: string[]; notifySelf: boolean }): Promise<Session>;
   getWorkspace(): Promise<WorkspaceData>;
   listTasks(): Promise<AssistantTask[]>;
+  createTask(input: CreateTaskInput): Promise<AssistantTask>;
   getTask(id: string): Promise<AssistantTask>;
   updateTask(id: string, input: { title?: string; description?: string }): Promise<AssistantTask>;
-  runTaskAction(id: string, input: { action: TaskAction; targetTaskId?: string; snoozeUntil?: string; dueAt?: string }): Promise<AssistantTask>;
+  runTaskAction(id: string, input: { action: TaskAction; targetTaskId?: string; snoozeUntil?: string; dueAt?: string; comment?: string }): Promise<AssistantTask>;
   resolveTaskConflict(id: string, resolution: 'keep_atlas' | 'keep_trello'): Promise<AssistantTask>;
   listReminders(): Promise<Reminder[]>;
   updateReminder(id: string, input: Partial<Pick<Reminder, 'scheduledAt' | 'state' | 'recurrence'>>): Promise<Reminder>;
@@ -433,10 +440,10 @@ class RealApi implements AppApi {
     return request<Chat[]>('/whatsapp/chats');
   }
 
-  updateChat(id: string, enabled: boolean) {
-    return request<{ id: string; enabled: boolean }>(`/whatsapp/chats/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ enabled }),
+  updateChat(id: string, input: boolean | { enabled?: boolean; groupId?: string | null; displayName?: string }) {
+    const patch = typeof input === 'boolean' ? { enabled: input } : input;
+    return request<Partial<Chat> & Pick<Chat, 'id'>>(`/whatsapp/chats/${encodeURIComponent(id)}`, {
+      method: 'PATCH', body: JSON.stringify(patch),
     });
   }
 
@@ -445,6 +452,24 @@ class RealApi implements AppApi {
       method: 'POST',
       body: JSON.stringify({ enabled }),
     });
+  }
+
+  listChatGroups() {
+    return request<ChatGroup[]>('/whatsapp/chat-groups');
+  }
+
+  createChatGroup(input: { name: string; description?: string; color?: string }) {
+    return request<ChatGroup>('/whatsapp/chat-groups', { method: 'POST', body: JSON.stringify(input) });
+  }
+
+  updateChatGroup(id: string, input: { name?: string; description?: string; color?: string }) {
+    return request<ChatGroup>(`/whatsapp/chat-groups/${encodeURIComponent(id)}`, {
+      method: 'PATCH', body: JSON.stringify(input),
+    });
+  }
+
+  deleteChatGroup(id: string) {
+    return request<void>(`/whatsapp/chat-groups/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
   completeOnboarding(input: { selectedChatIds: string[]; notifySelf: boolean }) {
@@ -460,6 +485,18 @@ class RealApi implements AppApi {
     return tasks.map(normalizeTask);
   }
 
+  async createTask(input: CreateTaskInput) {
+    return normalizeTask(await request<ApiTaskPayload>('/tasks', {
+      method: 'POST',
+      body: JSON.stringify({
+        title: input.title,
+        description: input.description ?? '',
+        status: input.status ?? 'open',
+        priority: input.priority ?? 'medium',
+      }),
+    }));
+  }
+
   async getTask(id: string) {
     return normalizeTask(await request<ApiTaskPayload>(`/tasks/${encodeURIComponent(id)}`));
   }
@@ -470,7 +507,7 @@ class RealApi implements AppApi {
     }));
   }
 
-  async runTaskAction(id: string, input: { action: TaskAction; targetTaskId?: string; snoozeUntil?: string; dueAt?: string }) {
+  async runTaskAction(id: string, input: { action: TaskAction; targetTaskId?: string; snoozeUntil?: string; dueAt?: string; comment?: string }) {
     const result = await request<{ task: ApiTaskPayload }>(`/tasks/${encodeURIComponent(id)}/actions`, { method: 'POST', body: JSON.stringify(input) });
     return normalizeTask(result.task);
   }
@@ -628,6 +665,8 @@ class PreviewApi implements AppApi {
   readonly isPreview = true;
   private notes = clone(demoNotes);
   private workspace = clone(demoWorkspace);
+  private chats = clone(demoChats);
+  private chatGroups = clone(demoChatGroups);
   private whatsappPolls = 0;
   private trelloSetup: TrelloSetup = clone(demoOnboarding.trello!);
   private profile: UserProfile = clone(demoOnboarding.profile!);
@@ -723,17 +762,56 @@ class PreviewApi implements AppApi {
 
   async listChats() {
     await pause(260);
-    return clone(demoChats);
+    return clone(this.chats);
   }
 
-  async updateChat(id: string, enabled: boolean) {
+  async updateChat(id: string, input: boolean | { enabled?: boolean; groupId?: string | null; displayName?: string }) {
     await pause(120);
-    return { id, enabled };
+    const chat = this.chats.find((item) => item.id === id);
+    if (!chat) throw new ApiError('Conversa não encontrada.', 404);
+    const patch = typeof input === 'boolean' ? { enabled: input } : input;
+    if (patch.enabled !== undefined) chat.selected = patch.enabled;
+    if (patch.displayName) chat.name = patch.displayName;
+    if (patch.groupId !== undefined) {
+      const group = patch.groupId ? this.chatGroups.find((item) => item.id === patch.groupId) : null;
+      chat.group = group ? { id: group.id, name: group.name, color: group.color } : null;
+      chat.classification = { source: group ? 'manual' : null, confidence: null, reason: null, updatedAt: null };
+    }
+    return clone(chat);
+  }
+
+  async listChatGroups() {
+    await pause(100);
+    return clone(this.chatGroups);
+  }
+
+  async createChatGroup(input: { name: string; description?: string; color?: string }) {
+    await pause(120);
+    const group: ChatGroup = { id: `preview-group-${Date.now()}`, name: input.name, description: input.description ?? '', color: input.color ?? '#7C5CFF', system: false, chatCount: 0, monitoredCount: 0 };
+    this.chatGroups.push(group);
+    return clone(group);
+  }
+
+  async updateChatGroup(id: string, input: { name?: string; description?: string; color?: string }) {
+    await pause(120);
+    const group = this.chatGroups.find((item) => item.id === id);
+    if (!group) throw new ApiError('Grupo não encontrado.', 404);
+    Object.assign(group, input);
+    return clone(group);
+  }
+
+  async deleteChatGroup(id: string) {
+    await pause(100);
+    const index = this.chatGroups.findIndex((item) => item.id === id && !item.system);
+    if (index < 0) throw new ApiError('Grupo não encontrado.', 404);
+    this.chatGroups.splice(index, 1);
+    for (const chat of this.chats) if (chat.group?.id === id) chat.group = null;
   }
 
   async setAllChatsMonitored(enabled: boolean) {
     await pause(160);
-    return { updated: demoChats.length, enabled } as { updated: number };
+    for (const chat of this.chats) chat.selected = enabled;
+    return { updated: this.chats.length };
   }
 
   async completeOnboarding() {
@@ -751,6 +829,26 @@ class PreviewApi implements AppApi {
     return clone(this.workspace.tasks ?? []);
   }
 
+  async createTask(input: CreateTaskInput) {
+    await pause(180);
+    const id = `preview-task-${Date.now()}`;
+    const task: AssistantTask = {
+      id,
+      title: input.title,
+      description: input.description ?? '',
+      status: input.status ?? 'open',
+      priority: input.priority ?? 'medium',
+      trelloSyncStatus: 'pending',
+      updatedAt: new Date().toISOString(),
+    };
+    this.workspace.tasks = [task, ...(this.workspace.tasks ?? [])];
+    const list = task.status === 'in_progress' ? 'Em andamento'
+      : task.status === 'paused' ? 'Pausado'
+        : task.status === 'done' ? 'Concluído' : 'A fazer';
+    this.workspace.trelloCards = [{ id: `preview-card-${Date.now()}`, taskId: id, title: task.title, list, labels: [] }, ...this.workspace.trelloCards];
+    return clone(task);
+  }
+
   async getTask(id: string) {
     await pause(80);
     const task = this.workspace.tasks?.find((item) => item.id === id);
@@ -766,7 +864,7 @@ class PreviewApi implements AppApi {
     return clone(task);
   }
 
-  async runTaskAction(id: string, input: { action: TaskAction; targetTaskId?: string; snoozeUntil?: string; dueAt?: string }) {
+  async runTaskAction(id: string, input: { action: TaskAction; targetTaskId?: string; snoozeUntil?: string; dueAt?: string; comment?: string }) {
     await pause(120);
     const task = this.workspace.tasks?.find((item) => item.id === id);
     if (!task) throw new ApiError('Tarefa não encontrada.', 404);
