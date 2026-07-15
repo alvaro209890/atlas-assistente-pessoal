@@ -265,16 +265,41 @@ export function normalizeDeepSeekDecision(value: unknown): unknown {
         ? { groupId: classification.groupId, confidence, reason: classification.reason, evidenceMessageIds }
         : null;
   }
-  // priority tem enum low|normal|high|urgent; o modelo confunde com o enum de
-  // risk (medium) ou responde em português. Aliases não criam novos níveis.
+  // Enums de tarefa: o modelo confunde níveis (medium), responde em português
+  // ou inventa variantes. Aliases mapeiam para o contrato e o fallback é
+  // sempre o valor mais conservador — nunca um privilégio novo.
   const priorityAliases: Record<string, string> = {
+    low: "low", normal: "normal", high: "high", urgent: "urgent",
     medium: "normal", media: "normal", moderada: "normal", padrao: "normal",
     baixa: "low", baixo: "low", alta: "high", alto: "high",
     urgente: "urgent", critica: "urgent", critico: "urgent", critical: "urgent",
   };
+  const listRoleAliases: Record<string, string> = {
+    inbox: "inbox", inprogress: "inProgress", paused: "paused", done: "done",
+    entrada: "inbox", caixa: "inbox", backlog: "inbox", todo: "inbox", "a fazer": "inbox",
+    andamento: "inProgress", "em andamento": "inProgress", progresso: "inProgress",
+    "in progress": "inProgress", in_progress: "inProgress", doing: "inProgress",
+    pausado: "paused", pausada: "paused", aguardando: "paused", waiting: "paused", blocked: "paused",
+    concluido: "done", concluida: "done", completo: "done", completa: "done",
+    finalizado: "done", finalizada: "done", completed: "done", feito: "done",
+  };
+  const dueBasisAliases: Record<string, string> = {
+    explicit: "explicit", explicit_relative: "explicit_relative", inferred: "inferred", none: "none",
+    explicito: "explicit", explicita: "explicit",
+    "explicit relative": "explicit_relative", relativo: "explicit_relative", relative: "explicit_relative",
+    inferido: "inferred", inferida: "inferred", estimado: "inferred", estimated: "inferred",
+    nenhum: "none", nenhuma: "none", sem_prazo: "none", null: "none",
+  };
+  const riskValues = new Set(["low", "medium", "high", "critical", "unknown"]);
   decision.tasks = (decision.tasks as Record<string, unknown>[]).map((task) => {
-    const priority = normalizedToken(task.priority);
-    return priorityAliases[priority] ? { ...task, priority: priorityAliases[priority] } : task;
+    const next = { ...task };
+    next.priority = priorityAliases[normalizedToken(next.priority)] ?? "normal";
+    next.targetListRole = listRoleAliases[normalizedToken(next.targetListRole)] ?? "inbox";
+    next.dueBasis = dueBasisAliases[normalizedToken(next.dueBasis)]
+      ?? (typeof next.dueAt === "string" && next.dueAt ? "inferred" : "none");
+    if (!riskValues.has(normalizedToken(next.risk))) next.risk = "unknown";
+    else next.risk = normalizedToken(next.risk);
+    return next;
   });
   if (typeof decision.conversationSummary !== "string" || !decision.conversationSummary.trim()) decision.conversationSummary = "Conversa analisada pelo Atlas.";
   if (typeof decision.briefReason !== "string" || !decision.briefReason.trim()) decision.briefReason = "Saída da IA normalizada com segurança.";
