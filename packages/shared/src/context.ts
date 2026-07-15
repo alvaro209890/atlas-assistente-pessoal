@@ -95,9 +95,9 @@ export function buildAiContext(input: BuildAiContextInput): AiContext {
   // primeira metade do lote antes de a IA ter oportunidade de analisá-la.
   const maxRecentMessages = Math.min(input.maxRecentMessages ?? DEFAULT_AI_CONTEXT_MAX_MESSAGES, 30);
   const maxContextChars = Math.max(6_000, Math.min(input.maxContextChars ?? DEFAULT_AI_CONTEXT_MAX_CHARS, 40_000));
-  const maxMemories = Math.min(input.maxMemories ?? 8, 10);
+  const maxMemories = Math.min(input.maxMemories ?? 12, 14);
   const maxCorrections = Math.min(input.maxCorrections ?? 8, 12);
-  const maxActiveLearnings = Math.min(input.maxActiveLearnings ?? 6, 6);
+  const maxActiveLearnings = Math.min(input.maxActiveLearnings ?? 10, 10);
   const maxCardCandidates = Math.min(input.maxCardCandidates ?? 8, 8);
   const preferences: AiPreferences = {
     ...DEFAULT_PREFERENCES,

@@ -15,7 +15,7 @@ describe('DeepSeek provider', () => {
       });
       expect(payload).not.toHaveProperty('temperature');
       expect(JSON.stringify(payload)).toContain('[fonte 1');
-      expect(JSON.stringify(payload)).toContain('cite as fontes como [1]');
+      expect(JSON.stringify(payload)).toContain('cite-as como [1]');
       expect(JSON.stringify(payload)).toContain('Nome preferido confirmado: Marina');
       expect(JSON.stringify(payload)).toContain('Objetivos: Organizar lançamentos');
       return new Response(JSON.stringify({

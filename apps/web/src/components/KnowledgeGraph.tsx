@@ -42,6 +42,7 @@ export function createGraphModel(nodes: GraphNode[], edges: GraphEdge[], query =
 
 export function KnowledgeGraph({ nodes, edges, onOpenNode }: KnowledgeGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const rendererRef = useRef<Sigma | null>(null);
   const [kind, setKind] = useState<'all' | GraphNode['kind']>('all');
   const [source, setSource] = useState<'all' | NonNullable<GraphNode['source']>>('all');
   const [period, setPeriod] = useState<'all' | '7' | '30' | '90'>('all');
@@ -86,7 +87,11 @@ export function KnowledgeGraph({ nodes, edges, onOpenNode }: KnowledgeGraphProps
     });
     renderer.on('clickNode', ({ node }) => setSelected(nodes.find((item) => item.id === node) || null));
     renderer.on('doubleClickNode', ({ node }) => onOpenNode?.(node));
-    return () => renderer.kill();
+    rendererRef.current = renderer;
+    return () => {
+      rendererRef.current = null;
+      renderer.kill();
+    };
   }, [nodes, onOpenNode, query, visibleEdges, visibleNodes]);
 
   if (!nodes.length) return <EmptyState icon={<Brain size={22} />} title="Seu grafo começa com uma conexão" description="Crie notas e use duplo colchete para relacionar pessoas, ideias e projetos." />;
@@ -109,7 +114,7 @@ export function KnowledgeGraph({ nodes, edges, onOpenNode }: KnowledgeGraphProps
             <option value="all">Todas as tags</option>{availableTags.map((item) => <option key={item} value={item}>#{item}</option>)}
           </select>
         </div>
-        <button className="icon-button" type="button" aria-label="Centralizar grafo"><Focus size={17} /></button>
+        <button className="icon-button" type="button" aria-label="Centralizar grafo" onClick={() => rendererRef.current?.getCamera().animatedReset({ duration: 350 })}><Focus size={17} /></button>
       </header>
       <div className="graph-canvas" ref={containerRef} aria-label={`Grafo com ${visibleNodes.length} itens e ${visibleEdges.length} conexões`} />
       <div className="graph-legend"><span><i style={{ background: colors.note }} /> Nota</span><span><i style={{ background: colors.project }} /> Projeto</span><span><i style={{ background: colors.person }} /> Pessoa</span><span><i style={{ background: colors.topic }} /> Tema</span></div>

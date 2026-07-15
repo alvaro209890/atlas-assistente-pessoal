@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { AiProvider, AiSource } from '../ai.js';
+import type { AiProvider, AiSource, AiWorkspaceSnapshot } from '../ai.js';
 import { currentUser } from '../auth.js';
 import { AppError, parseInput } from '../errors.js';
 import type { EventHub } from '../events.js';
@@ -102,7 +102,7 @@ async function retrieveSources(database: AppDatabase, userId: string, query: str
        WHERE n.user_id=$1 AND n.status<>'deleted'
          AND (n.id=$3::uuid OR n.search_vector@@input.tsq
            OR similarity(n.title,$2)>0.12 OR n.title ILIKE '%'||$2||'%')
-       ORDER BY score DESC,n.updated_at DESC LIMIT 8
+       ORDER BY score DESC,n.updated_at DESC LIMIT 10
      ), candidate_scores AS (
        SELECT id,score FROM ranked
        UNION ALL
@@ -119,10 +119,63 @@ async function retrieveSources(database: AppDatabase, userId: string, query: str
        n.source_type,n.updated_at
      FROM candidates c
      JOIN brain_nodes n ON n.id=c.id AND n.user_id=$1 AND n.status<>'deleted'
-     ORDER BY c.score DESC,n.updated_at DESC LIMIT 10`,
+     ORDER BY c.score DESC,n.updated_at DESC LIMIT 12`,
     [userId, query, noteId ?? null],
   );
   return result.rows.map(sourceJson);
+}
+
+async function loadWorkspaceSnapshot(database: AppDatabase, userId: string): Promise<AiWorkspaceSnapshot> {
+  const [tasks, reminders, commitments, learnings, summary] = await Promise.all([
+    database.query<{ title: string; status: string; priority: string | null; due_at: Date | null; project: string | null }>(
+      `SELECT title,status,priority,due_at,NULLIF(metadata->>'project','') AS project
+       FROM canonical_tasks
+       WHERE user_id=$1 AND status NOT IN ('done','cancelled','merged')
+       ORDER BY due_at NULLS LAST,updated_at DESC LIMIT 14`,
+      [userId],
+    ),
+    database.query<{ title: string; scheduled_for: Date | null; recurrence: string | null }>(
+      `SELECT title,scheduled_for,NULLIF(recurrence->>'rule','') AS recurrence
+       FROM reminders WHERE user_id=$1 AND status='scheduled'
+       ORDER BY scheduled_for NULLS LAST LIMIT 10`,
+      [userId],
+    ),
+    database.query<{ title: string; direction: string; counterpart_name: string | null; due_at: Date | null }>(
+      `SELECT title,direction,counterpart_name,due_at
+       FROM commitments WHERE user_id=$1 AND status IN ('open','waiting')
+       ORDER BY COALESCE(next_follow_up_at,due_at) NULLS LAST,updated_at DESC LIMIT 10`,
+      [userId],
+    ),
+    database.query<{ statement: string }>(
+      `SELECT statement FROM assistant_learnings
+       WHERE user_id=$1 AND state='active' AND requires_confirmation=false
+       ORDER BY source_type='explicit' DESC,confidence DESC LIMIT 8`,
+      [userId],
+    ),
+    database.query<{ content: string }>(
+      `SELECT left(concat_ws(E'\n',NULLIF(manual_content,''),NULLIF(generated_content,'')),900) AS content
+       FROM brain_nodes
+       WHERE user_id=$1 AND type IN ('daily_summary','weekly_review','consolidated_summary') AND status<>'deleted'
+       ORDER BY updated_at DESC LIMIT 1`,
+      [userId],
+    ),
+  ]);
+  return {
+    tasks: tasks.rows.map((row) => ({
+      title: row.title, status: row.status, priority: row.priority,
+      dueAt: row.due_at ? row.due_at.toISOString() : null, project: row.project,
+    })),
+    reminders: reminders.rows.map((row) => ({
+      title: row.title, scheduledFor: row.scheduled_for ? row.scheduled_for.toISOString() : null,
+      recurrence: row.recurrence,
+    })),
+    commitments: commitments.rows.map((row) => ({
+      title: row.title, direction: row.direction, counterpart: row.counterpart_name,
+      dueAt: row.due_at ? row.due_at.toISOString() : null,
+    })),
+    learnings: learnings.rows.map((row) => row.statement),
+    latestSummary: summary.rows[0]?.content ?? null,
+  };
 }
 
 async function askWithContext(
@@ -132,7 +185,7 @@ async function askWithContext(
 ): Promise<{ answer: string; sources: AiSource[]; threadId: string; messageId: string; proposals: unknown[] }> {
   const user = currentUser(request);
   const { database, ai, events } = deps;
-  const [sources, profileResult] = await Promise.all([
+  const [sources, profileResult, workspace] = await Promise.all([
     retrieveSources(database, user.id, input.message, input.context.noteId),
     database.query<ChatProfileRow>(
       `SELECT u.preferred_name,u.full_name,p.professional_area,p.goals,
@@ -141,6 +194,7 @@ async function askWithContext(
        JOIN user_settings s ON s.user_id=u.id WHERE u.id=$1`,
       [user.id],
     ),
+    loadWorkspaceSnapshot(database, user.id),
   ]);
   const profile = profileResult.rows[0];
   let threadId = input.threadId;
@@ -180,6 +234,7 @@ async function askWithContext(
       message: input.message,
       sources,
       conversation,
+      workspace,
       ...(profile ? {
         profile: {
           preferredName: profile.preferred_name,

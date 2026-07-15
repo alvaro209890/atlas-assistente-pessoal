@@ -75,7 +75,7 @@ export function PersonalTodayView({ data, onOpenTask, onTaskAction, onSelectNote
           {tasks.length ? <div className="assistant-task-list">{tasks.slice(0, 5).map((task) => (
             <article key={task.id} className={`assistant-task assistant-task--${task.priority}`}>
               <button type="button" className="task-check" aria-label={`Concluir ${task.title}`} onClick={() => onTaskAction(task.id, { action: 'complete' })}><CheckCircle2 size={18} /></button>
-              <div className="assistant-task__main"><span><strong>{task.title}</strong>{task.priority === 'urgent' && <em>Urgente</em>}</span><small>{task.projectName || 'Sem projeto'}{task.dueLabel ? ` · ${task.dueLabel}` : ''}</small>{whyOpen === task.id && <p className="task-reason"><CircleHelp size={13} /> {task.risk || task.nextAction || 'Atlas priorizou esta tarefa pelo prazo, contexto recente e dependências abertas.'}</p>}</div>
+              <div className="assistant-task__main"><span><strong>{task.title}</strong>{task.priority === 'urgent' && <em>Urgente</em>}</span><small>{task.projectName || 'Sem projeto'}{taskDueLabel(task) ? ` · ${taskDueLabel(task)}` : ''}</small>{whyOpen === task.id && <p className="task-reason"><CircleHelp size={13} /> {task.risk || task.nextAction || 'Atlas priorizou esta tarefa pelo prazo, contexto recente e dependências abertas.'}</p>}</div>
               <div className="assistant-task__actions"><button type="button" onClick={() => onTaskAction(task.id, { action: 'snooze', snoozeUntil: tomorrowAtNine() })}><Clock3 size={13} /> Adiar</button><button type="button" onClick={() => setWhyOpen((current) => current === task.id ? null : task.id)}><CircleHelp size={13} /> Por quê</button><button type="button" onClick={() => onOpenTask(task.id)}><ArrowUpRight size={13} /> Abrir</button></div>
             </article>
           ))}</div> : <EmptyState title="Nada urgente por agora" description="Quando algo exigir sua atenção, Atlas colocará aqui com uma explicação." />}
@@ -197,7 +197,7 @@ export function TaskDrawer({ task, availableTasks, onClose, onUpdate, onAction, 
         <div className="task-drawer__content">
           <div className="task-drawer__eyebrow"><span className={`priority-badge priority-badge--${task.priority}`}>{task.priority === 'urgent' ? 'Urgente' : task.priority === 'high' ? 'Alta' : task.priority === 'medium' ? 'Média' : 'Baixa'}</span><span>{task.status.replace('_', ' ')}</span></div>
           {editing ? <section className="task-edit-form"><label><span>Título</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label><label><span>Descrição</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} /></label><div><button type="button" className="button button--primary button--small" disabled={!title.trim()} onClick={() => { onUpdate(task.id, { title: title.trim(), description }); setEditing(false); }}><Check size={13} /> Salvar edição</button><button type="button" className="button button--ghost button--small" onClick={() => setEditing(false)}>Cancelar</button></div></section> : <><h2 id="task-drawer-title">{task.title}</h2>{task.description && <p className="task-description">{task.description}</p>}<button type="button" className="text-link task-edit-trigger" onClick={() => setEditing(true)}><Pencil size={13} /> Editar título e descrição</button></>}
-          <dl><div><dt>Projeto</dt><dd>{task.projectName || 'Sem projeto'}</dd></div><div><dt>Prazo</dt><dd>{task.dueLabel || task.dueAt || 'Sem prazo'}</dd></div><div><dt>Próxima ação</dt><dd>{task.nextAction || 'Ainda não definida'}</dd></div><div><dt>Responsável</dt><dd>{task.expectedOwner || 'Você'}</dd></div><div><dt>Estimativa</dt><dd>{task.estimateMinutes ? `${task.estimateMinutes} min` : 'Não estimada'}</dd></div><div><dt>Recorrência</dt><dd>{task.recurrence || 'Não recorrente'}</dd></div></dl>
+          <dl><div><dt>Projeto</dt><dd>{task.projectName || 'Sem projeto'}</dd></div><div><dt>Prazo</dt><dd>{taskDueLabel(task) || 'Sem prazo'}</dd></div><div><dt>Próxima ação</dt><dd>{task.nextAction || 'Ainda não definida'}</dd></div><div><dt>Responsável</dt><dd>{task.expectedOwner || 'Você'}</dd></div><div><dt>Estimativa</dt><dd>{task.estimateMinutes ? `${task.estimateMinutes} min` : 'Não estimada'}</dd></div><div><dt>Recorrência</dt><dd>{task.recurrence || 'Não recorrente'}</dd></div></dl>
           {task.risk && <section className="task-risk"><AlertTriangle size={15} /><div><strong>Por que merece atenção</strong><p>{task.risk}</p></div></section>}
           {task.trelloSyncStatus === 'conflict' && <section className="task-conflict"><AlertTriangle size={16} /><div><strong>Conflito com o Trello</strong><p>A tarefa mudou nos dois lados. Escolha qual versão deve prevalecer.</p><div><button type="button" className="button button--primary button--small" onClick={() => onResolveConflict(task.id, 'keep_atlas')}>Manter Atlas</button><button type="button" className="button button--secondary button--small" onClick={() => onResolveConflict(task.id, 'keep_trello')}>Usar Trello</button></div></div></section>}
           <section className="task-sources"><strong>Rastreabilidade</strong><p>{task.sourceMessageIds?.length ? `${task.sourceMessageIds.length} mensagens usadas como evidência` : 'Criada a partir do seu contexto.'}</p>{task.trelloCardUrl && <a href={task.trelloCardUrl} target="_blank" rel="noreferrer">Abrir cartão no Trello <ExternalLink size={13} /></a>}</section>
@@ -216,3 +216,18 @@ const tomorrowAtNine = () => {
   date.setHours(9, 0, 0, 0);
   return date.toISOString();
 };
+
+export function taskDueLabel(task: Pick<AssistantTask, 'dueLabel' | 'dueAt'>): string | null {
+  if (task.dueLabel) return task.dueLabel;
+  if (!task.dueAt) return null;
+  const due = new Date(task.dueAt);
+  if (Number.isNaN(due.getTime())) return null;
+  const now = new Date();
+  const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const dayDelta = Math.round((startOfDay(due) - startOfDay(now)) / 86_400_000);
+  const time = due.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  if (dayDelta < 0) return `Venceu ${due.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}`;
+  if (dayDelta === 0) return `Hoje, ${time}`;
+  if (dayDelta === 1) return `Amanhã, ${time}`;
+  return due.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
+}

@@ -83,7 +83,9 @@ describe('Workspace live updates', () => {
     fireEvent.click(trello);
     expect(trello).toHaveAttribute('aria-current', 'page');
     expect(today).not.toHaveAttribute('aria-current');
-    expect(screen.queryByLabelText('Abrir assistente')).not.toBeInTheDocument();
+    // O chat lateral persistente faz parte do Workspace em todas as views.
+    expect(screen.getByLabelText('Assistente Atlas')).toBeInTheDocument();
+    expect(screen.getByLabelText('Abrir assistente')).toBeInTheDocument();
   });
 
   it('executes Trello card actions instead of rendering inert controls', async () => {

@@ -8,10 +8,19 @@ export interface AiSource {
   updatedAt: string;
 }
 
+export interface AiWorkspaceSnapshot {
+  tasks: Array<{ title: string; status: string; priority: string | null; dueAt: string | null; project: string | null }>;
+  reminders: Array<{ title: string; scheduledFor: string | null; recurrence: string | null }>;
+  commitments: Array<{ title: string; direction: string; counterpart: string | null; dueAt: string | null }>;
+  learnings: string[];
+  latestSummary: string | null;
+}
+
 export interface AiPrompt {
   message: string;
   sources: AiSource[];
   conversation?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  workspace?: AiWorkspaceSnapshot;
   profile?: {
     preferredName: string;
     fullName: string | null;
@@ -58,6 +67,34 @@ const deepseekResponseSchema = z.object({
   }).optional(),
 });
 
+export function renderWorkspaceSnapshot(snapshot: AiWorkspaceSnapshot): string {
+  const lines: string[] = [];
+  if (snapshot.tasks.length) {
+    lines.push('Tarefas abertas:');
+    for (const task of snapshot.tasks) {
+      lines.push(`- ${task.title} (status: ${task.status}${task.priority ? `, prioridade: ${task.priority}` : ''}${task.dueAt ? `, prazo: ${task.dueAt}` : ''}${task.project ? `, projeto: ${task.project}` : ''})`);
+    }
+  }
+  if (snapshot.reminders.length) {
+    lines.push('Lembretes agendados:');
+    for (const reminder of snapshot.reminders) {
+      lines.push(`- ${reminder.title}${reminder.scheduledFor ? ` (para ${reminder.scheduledFor})` : ''}${reminder.recurrence ? ` [recorrência: ${reminder.recurrence}]` : ''}`);
+    }
+  }
+  if (snapshot.commitments.length) {
+    lines.push('Compromissos em aberto:');
+    for (const commitment of snapshot.commitments) {
+      lines.push(`- ${commitment.direction === 'owed_by_me' ? 'Você prometeu' : 'Aguardando de terceiro'}: ${commitment.title}${commitment.counterpart ? ` (com ${commitment.counterpart})` : ''}${commitment.dueAt ? `, prazo: ${commitment.dueAt}` : ''}`);
+    }
+  }
+  if (snapshot.learnings.length) {
+    lines.push('Preferências e aprendizados ativos:');
+    for (const learning of snapshot.learnings) lines.push(`- ${learning}`);
+  }
+  if (snapshot.latestSummary) lines.push(`Resumo mais recente do dia:\n${snapshot.latestSummary}`);
+  return lines.join('\n').slice(0, 6_000) || '(espaço de trabalho vazio)';
+}
+
 export function invalidCitationNumbers(answer: string, sourceCount: number): number[] {
   return [...new Set(
     [...answer.matchAll(/\[(\d+)\]/g)]
@@ -85,6 +122,7 @@ export class DeepSeekProvider implements AiProvider {
     const context = prompt.sources.map((source, index) =>
       `[fonte ${index + 1} | id=${source.id} | ${source.kind}] ${source.title}\n${source.excerpt}`,
     ).join('\n\n');
+    const workspace = prompt.workspace ? renderWorkspaceSnapshot(prompt.workspace) : null;
     const profile = prompt.profile
       ? [
           `Nome preferido confirmado: ${prompt.profile.preferredName}`,
@@ -115,12 +153,12 @@ export class DeepSeekProvider implements AiProvider {
           messages: [
             {
               role: 'system',
-              content: 'Você é Atlas, um assistente pessoal masculino, calmo, direto, humano e proativo. Explique prioridades sem ser invasivo. Responda em português claro. Use apenas o contexto fornecido para fatos pessoais e indique incertezas. Nunca atribua um nome à pessoa sem que ele esteja confirmado no perfil. Não afirme que executou uma ação: a interface apresentará propostas confirmáveis separadamente. Ao sustentar uma afirmação, cite as fontes como [1], [2] ... [N], usando exatamente o número que corresponde à ordem das fontes recebidas. Nunca invente um número de fonte.',
+              content: 'Você é Atlas, um assistente pessoal masculino, calmo, direto, humano e proativo. Explique prioridades sem ser invasivo. Responda em português claro. Use apenas o contexto fornecido para fatos pessoais e indique incertezas. Nunca atribua um nome à pessoa sem que ele esteja confirmado no perfil. Não afirme que executou uma ação: a interface apresentará propostas confirmáveis separadamente. Use o estado do espaço de trabalho (tarefas, lembretes, compromissos e resumo) para dar respostas concretas sobre prioridades, prazos e pendências, sem citar esse bloco por número. Respeite os aprendizados listados como preferências já confirmadas pela pessoa. Ao sustentar uma afirmação factual vinda das fontes numeradas, cite-as como [1], [2] ... [N], usando exatamente o número que corresponde à ordem das fontes recebidas. Nunca invente um número de fonte. Se faltar uma informação essencial, diga o que falta e faça uma única pergunta objetiva.',
             },
-            ...(prompt.conversation ?? []).slice(-8),
+            ...(prompt.conversation ?? []).slice(-12),
             {
               role: 'user',
-              content: `Perfil confirmado da pessoa:\n${profile}\n\nPergunta:\n${prompt.message}\n\nContexto recuperado:\n${context || '(nenhum contexto recuperado)'}`,
+              content: `Perfil confirmado da pessoa:\n${profile}\n\n${workspace ? `Estado atual do espaço de trabalho (dados do sistema, confiáveis):\n${workspace}\n\n` : ''}Pergunta:\n${prompt.message}\n\nContexto recuperado:\n${context || '(nenhum contexto recuperado)'}`,
             },
           ],
         }),

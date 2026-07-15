@@ -731,7 +731,7 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
              OR similarity(title,left($2,1000))>0.18
            )
          ORDER BY score DESC,similarity(title,left($2,1000)) DESC,updated_at DESC
-         LIMIT 5
+         LIMIT 8
        ), related_candidates AS (
          SELECT DISTINCT ON (node.id) node.id,node.type,node.title,
                 concat_ws(E'\n',NULLIF(node.manual_content,''),NULLIF(node.generated_content,'')) AS content,
@@ -745,11 +745,21 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
          ORDER BY node.id,edge.weight DESC,node.updated_at DESC
        ), related AS (
          SELECT id,type,title,content,aliases,tags FROM related_candidates
-         ORDER BY weight DESC,updated_at DESC LIMIT 3
+         ORDER BY weight DESC,updated_at DESC LIMIT 5
+       ), latest_summary AS (
+         SELECT id,type,title,
+                concat_ws(E'\n',NULLIF(manual_content,''),NULLIF(generated_content,'')) AS content,
+                aliases,tags
+         FROM brain_nodes
+         WHERE user_id=$1 AND status='active'
+           AND type IN ('daily_summary','weekly_review','consolidated_summary')
+         ORDER BY updated_at DESC LIMIT 1
        )
        SELECT type,title,content,aliases,tags FROM ranked
        UNION ALL
-       SELECT type,title,content,aliases,tags FROM related`,
+       SELECT type,title,content,aliases,tags FROM related
+       UNION ALL
+       SELECT type,title,content,aliases,tags FROM latest_summary`,
       [userId, queryText],
     );
     const cardsResult = await this.database.query<{
@@ -828,7 +838,7 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
            OR (scope_type = 'project' AND scope_id=ANY($4::text[]))
          )
        ORDER BY source_type = 'explicit' DESC, confidence DESC, last_used_at DESC NULLS LAST
-       LIMIT 6`,
+       LIMIT 10`,
       [userId, chatJid, personScopeRefs, projectScopeRefs],
     );
     if (learningsResult.rows.length) {
@@ -1208,7 +1218,7 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
       // modelo). Isso deixa o grafo navegável mesmo se a IA omitir relations.
       await client.query(
         `INSERT INTO brain_edges (user_id,from_node_id,to_node_id,relation_type,weight,provenance)
-         SELECT DISTINCT $1,source.node_id,entity.node_id,'about',0.78,'evidence'
+         SELECT DISTINCT $1::uuid,source.node_id,entity.id,'about',0.78,'evidence'
          FROM brain_node_sources source
          JOIN brain_nodes note ON note.id=source.node_id AND note.user_id=source.user_id
          JOIN brain_node_sources entity_source
@@ -1219,7 +1229,7 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
          WHERE source.user_id=$1 AND source.node_id=ANY($2::uuid[])
            AND note.type IN ('note','decision','reference','procedure')
            AND entity.type IN ('person','project','group','entity')
-           AND source.node_id<>entity.node_id
+           AND source.node_id<>entity.id
          ON CONFLICT (user_id,from_node_id,to_node_id,relation_type)
          DO UPDATE SET weight=GREATEST(brain_edges.weight,EXCLUDED.weight),provenance='evidence'`,
         [userId, [...new Set(nodeIds.values())]],
@@ -1299,7 +1309,7 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
     if (evidenceMessageIds.length === 0) return;
     await this.database.query(
         `INSERT INTO brain_node_sources (user_id,node_id,source_kind,source_id,title,excerpt,metadata)
-         SELECT $1,$2,'whatsapp_message',wm.external_message_id,wm.chat_jid,left(wm.body,2000),
+         SELECT $1::uuid,$2::uuid,'whatsapp_message',wm.external_message_id,wm.chat_jid,left(wm.body,2000),
                 jsonb_build_object('generatedBy','atlas-ai','taskEvidence',true)
          FROM whatsapp_messages wm
          WHERE wm.user_id=$1 AND wm.external_message_id=ANY($3::text[])
@@ -1308,7 +1318,7 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
     );
     await this.database.query(
         `INSERT INTO brain_edges (user_id,from_node_id,to_node_id,relation_type,weight,provenance)
-         SELECT $1,source.node_id,$2,'context_for',0.85,'evidence'
+         SELECT $1::uuid,source.node_id,$2::uuid,'context_for',0.85,'evidence'
          FROM brain_node_sources source
          JOIN brain_nodes node ON node.id=source.node_id AND node.user_id=source.user_id
          WHERE source.user_id=$1 AND source.source_kind='whatsapp_message'
@@ -1403,7 +1413,7 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
          SELECT direction,body,sent_at,id
          FROM platform_whatsapp_messages
          WHERE user_id=$1 AND sent_at>=now()-make_interval(mins => $2)
-         ORDER BY sent_at DESC,id DESC LIMIT 12
+         ORDER BY sent_at DESC,id DESC LIMIT 20
        ) recent ORDER BY sent_at,id`,
       [userId, idleMinutes],
     );
@@ -1421,7 +1431,27 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
     const memories = await this.database.query<{ title: string; content: string }>(
       `SELECT title,concat_ws(E'\n',NULLIF(manual_content,''),NULLIF(generated_content,'')) AS content
        FROM brain_nodes WHERE user_id=$1 AND status='active' AND type<>'task'
-       ORDER BY updated_at DESC LIMIT 6`,
+       ORDER BY updated_at DESC LIMIT 10`,
+      [userId],
+    );
+    const reminders = await this.database.query<{ title: string; scheduled_for: Date | null }>(
+      `SELECT title,scheduled_for FROM reminders
+       WHERE user_id=$1 AND status='scheduled'
+       ORDER BY scheduled_for NULLS LAST LIMIT 8`,
+      [userId],
+    );
+    const commitments = await this.database.query<{
+      title: string; direction: string; counterpart_name: string | null; due_at: Date | null;
+    }>(
+      `SELECT title,direction,counterpart_name,due_at FROM commitments
+       WHERE user_id=$1 AND status IN ('open','waiting')
+       ORDER BY COALESCE(next_follow_up_at,due_at) NULLS LAST,updated_at DESC LIMIT 8`,
+      [userId],
+    );
+    const learnings = await this.database.query<{ statement: string }>(
+      `SELECT statement FROM assistant_learnings
+       WHERE user_id=$1 AND state='active' AND requires_confirmation=false
+       ORDER BY source_type='explicit' DESC,confidence DESC LIMIT 8`,
       [userId],
     );
     return {
@@ -1437,6 +1467,17 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
         dueAt: task.due_at?.toISOString() ?? null,
       })),
       memories: memories.rows,
+      reminders: reminders.rows.map((row) => ({
+        title: row.title,
+        scheduledFor: row.scheduled_for?.toISOString() ?? null,
+      })),
+      commitments: commitments.rows.map((row) => ({
+        title: row.title,
+        direction: row.direction,
+        counterpart: row.counterpart_name,
+        dueAt: row.due_at?.toISOString() ?? null,
+      })),
+      learnings: learnings.rows.map((row) => row.statement),
     };
   }
 

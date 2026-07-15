@@ -7,13 +7,17 @@ import {
   Command,
   LogOut,
   Menu,
+  MessageCircle,
+  PanelRightOpen,
   Plus,
   Search,
   Sparkles,
+  SquareKanban,
   X,
 } from 'lucide-react';
 import type { AppApi } from '../api';
 import type { AssistantTask, CreateTaskInput, FeedbackAction, LearningAction, Note, NavId, Session, TaskAction, WorkspaceData } from '../types';
+import { AIAssistant } from '../components/AIAssistant';
 import { CommandPalette } from '../components/CommandPalette';
 import { Avatar, Brand, ErrorState } from '../components/ui';
 import { mobileNavIds, navItems, viewMeta } from './navigation';
@@ -44,6 +48,8 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
   const [noteError, setNoteError] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [aiMobileOpen, setAiMobileOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<AssistantTask | null>(null);
@@ -116,6 +122,11 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
     setSelectedNoteId(id);
     navigate('brain');
   }, [navigate]);
+
+  const openAiSource = useCallback((id: string) => {
+    setAiMobileOpen(false);
+    openNote(id);
+  }, [openNote]);
 
   const loadNote = useCallback(async () => {
     if (!selectedNoteId) {
@@ -362,6 +373,8 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
       if (event.key === 'Escape') {
         setPaletteOpen(false);
         setMobileMenuOpen(false);
+        setNotificationsOpen(false);
+        setAiMobileOpen(false);
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -408,7 +421,22 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
             <div className="breadcrumbs"><span>Atlas</span><ChevronDown size={13} /><strong>{viewMeta[activeView].title}</strong></div>
             <button className="topbar-search" type="button" onClick={() => setPaletteOpen(true)}><Search size={15} /><span>Busque notas, pessoas ou projetos…</span><kbd>⌘ K</kbd></button>
             <div className="topbar__actions">
-              <button className="icon-button" type="button" aria-label="Notificações"><Bell size={17} /><i /></button>
+              <div className="notification-anchor">
+                <button className="icon-button" type="button" aria-label="Notificações" aria-expanded={notificationsOpen} onClick={() => setNotificationsOpen((current) => !current)}><Bell size={17} />{(data?.activities.length ?? 0) > 0 && <i />}</button>
+                {notificationsOpen && (
+                  <div className="notification-menu" role="menu" aria-label="Atividade recente">
+                    <header><strong>Atividade recente</strong><button type="button" onClick={() => setNotificationsOpen(false)} aria-label="Fechar notificações"><X size={14} /></button></header>
+                    {data?.activities.length ? data.activities.slice(0, 8).map((item) => (
+                      <article key={item.id}>
+                        <span className={`activity-kind activity-kind--${item.kind}`}>{item.kind === 'whatsapp' ? <MessageCircle size={13} /> : item.kind === 'trello' ? <SquareKanban size={13} /> : item.kind === 'ai' ? <Sparkles size={13} /> : <Brain size={13} />}</span>
+                        <div><strong>{item.title}</strong>{item.detail && <small>{item.detail}</small>}</div>
+                        <time>{formatRelativeTime(item.at)}</time>
+                      </article>
+                    )) : <p className="notification-menu__empty">Nenhuma atividade por enquanto.</p>}
+                  </div>
+                )}
+              </div>
+              <button className="icon-button topbar-ai-button" type="button" onClick={() => setAiMobileOpen(true)} aria-label="Abrir assistente"><PanelRightOpen size={18} /></button>
               <button className="button button--primary button--small topbar-new-note" type="button" onClick={() => void createNote()}><Plus size={15} /> Nova nota</button>
               <Avatar name={displayName} size="small" />
             </div>
@@ -454,6 +482,9 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
           </div>
         </section>
 
+        <AIAssistant api={api} view={activeView} noteId={selectedNoteId} tasks={data?.tasks ?? []} mobileOpen={aiMobileOpen} onMobileClose={() => setAiMobileOpen(false)} onOpenNote={openAiSource} />
+        {aiMobileOpen && <button type="button" className="mobile-overlay" onClick={() => setAiMobileOpen(false)} aria-label="Fechar assistente" />}
+
       </div>
 
       <TaskDrawer
@@ -484,6 +515,18 @@ export function Workspace({ api, session, onLogout, onEnterPreview, onExitPrevie
 
 function NavGroup({ items, activeView, onNavigate }: { items: typeof navItems; activeView: NavId; onNavigate(view: NavId): void }) {
   return <div className="nav-group">{items.map((item) => { const Icon = item.icon; return <button type="button" key={item.id} aria-current={activeView === item.id ? 'page' : undefined} className={activeView === item.id ? 'is-active' : ''} onClick={() => onNavigate(item.id)}><span className="nav-group__icon"><Icon size={17} /></span><span className="nav-group__copy"><strong>{item.label}</strong><small>{item.description}</small></span><i aria-hidden="true" /></button>; })}</div>;
+}
+
+export function formatRelativeTime(value: string): string {
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return value;
+  const deltaMinutes = Math.round((Date.now() - time) / 60_000);
+  if (deltaMinutes < 1) return 'agora';
+  if (deltaMinutes < 60) return `há ${deltaMinutes} min`;
+  const deltaHours = Math.floor(deltaMinutes / 60);
+  if (deltaHours < 24) return `há ${deltaHours} h`;
+  const date = new Date(time);
+  return date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
 }
 
 function WorkspaceSkeleton() {

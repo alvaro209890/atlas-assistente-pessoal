@@ -22,6 +22,14 @@ import { PgBoss } from "pg-boss";
 
 import type { WorkerConfig } from "./config.js";
 import { WorkerRepository } from "./repository.js";
+import {
+  archiveResolvedPendingNotes,
+  collectFailedBatchesForRequeue,
+  consolidateDuplicateLearnings,
+  listActiveUserIds,
+  maybeAskProactiveQuestion,
+  weaveMentionEdges,
+} from "./self-improve.js";
 
 export const QUEUES = {
   analyze: "atlas.ai.analyze-batch",
@@ -33,6 +41,7 @@ export const QUEUES = {
   consolidatedSummary: "atlas.brain.consolidated-summary",
   trelloSync: "atlas.trello.sync-cards",
   reminderTick: "atlas.reminder.tick",
+  selfImprove: "atlas.brain.self-improve",
 } as const;
 
 export interface AnalyzeBatchJob {
@@ -538,6 +547,37 @@ export async function registerHandlers(dependencies: HandlerDependencies): Promi
     }
   });
 
+  await boss.work<Record<string, never>>(QUEUES.selfImprove, { batchSize: 1 }, async () => {
+    const requeues = await collectFailedBatchesForRequeue(repository);
+    for (const item of requeues) {
+      await repository.updateBatchStatus(item.userId, item.batchId, "ready");
+      await boss.send(QUEUES.analyze, {
+        userId: item.userId,
+        chatJid: item.chatJid,
+        messages: item.messages,
+        batchKey: item.batchKey,
+        batchId: item.batchId,
+        attempt: 0,
+        immediateRepairAttempt: false,
+      } satisfies AnalyzeBatchJob);
+    }
+    for (const userId of await listActiveUserIds(repository)) {
+      // Cada usuário é isolado: uma falha (ex.: sem WhatsApp conectado para a
+      // pergunta proativa) não pode bloquear a manutenção dos demais.
+      try {
+        await weaveMentionEdges(repository, userId);
+        await archiveResolvedPendingNotes(repository, userId);
+        await consolidateDuplicateLearnings(repository, userId);
+        const outboxId = await maybeAskProactiveQuestion(repository, userId);
+        if (outboxId !== null) {
+          await boss.send(QUEUES.notification, { outboxId, attempt: 0 } satisfies NotificationJob);
+        }
+      } catch {
+        continue;
+      }
+    }
+  });
+
   await boss.work<Record<string, never>>(QUEUES.dailySummary, { batchSize: 1 }, async () => {
     await repository.generateBrainSummaries("daily_summary");
   });
@@ -559,5 +599,9 @@ export async function registerHandlers(dependencies: HandlerDependencies): Promi
   await boss.schedule(QUEUES.weeklyReview, "20 * * * *", {});
   await boss.schedule(QUEUES.consolidatedSummary, "30 * * * *", {});
   await boss.schedule(QUEUES.trelloSync, "* * * * *", { userId: null, attempt: 0 });
+  // Varredura de auto-aprimoramento: reprocessa falhas, tece o grafo, consolida
+  // aprendizados e pergunta dúvidas reais ao dono. Roda na subida e a cada 30min.
+  await boss.schedule(QUEUES.selfImprove, "*/30 * * * *", {});
+  await boss.send(QUEUES.selfImprove, {});
   await boss.send(QUEUES.trelloSync, { userId: null, attempt: 0 } satisfies TrelloSyncJob);
 }

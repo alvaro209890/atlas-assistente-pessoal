@@ -1,27 +1,19 @@
 import {
-  Activity as ActivityIcon,
   ArrowUpRight,
   Bot,
   Brain,
-  Ban,
   CalendarClock,
   Check,
   CheckCircle2,
   ChevronRight,
-  Circle,
-  Clock3,
   ExternalLink,
   FilePlus2,
   Filter,
-  Link2,
   MessageCircle,
   MessageSquareText,
   MoreHorizontal,
-  Merge,
-  Pencil,
   Plus,
   Search,
-  Settings2,
   Sparkles,
   SquareKanban,
   Tag,
@@ -110,93 +102,24 @@ export function ViewContent(props: ViewContentProps) {
   );
 }
 
-function TodayView({ data, onSelectNote, onFeedback }: { data: WorkspaceData; onSelectNote(id: string): void; onFeedback(itemId: string, action: FeedbackAction, context: 'activity'): void }) {
-  return (
-    <div className="today-layout">
-      <section className="stat-strip" aria-label="Resumo">
-        <article><span className="stat-icon stat-icon--purple"><MessageCircle size={17} /></span><div><strong>{data.stats.inbox}</strong><small>itens no inbox</small></div><ChevronRight size={15} /></article>
-        <article><span className="stat-icon stat-icon--mint"><Brain size={17} /></span><div><strong>{data.stats.notes}</strong><small>notas conectadas</small></div><ChevronRight size={15} /></article>
-        <article><span className="stat-icon stat-icon--amber"><Link2 size={17} /></span><div><strong>{data.stats.connections}</strong><small>conexões ativas</small></div><ChevronRight size={15} /></article>
-        <article><span className="stat-icon stat-icon--blue"><SquareKanban size={17} /></span><div><strong>{data.stats.openTasks}</strong><small>tarefas abertas</small></div><ChevronRight size={15} /></article>
-      </section>
-
-      <div className="today-columns">
-        <section className="surface focus-card">
-          <header className="section-heading"><div><span className="section-kicker"><Sparkles size={14} /> Foco recomendado</span><h2>O que move seu dia</h2></div><button className="text-link" type="button">Ver todas</button></header>
-          {data.focus.length ? <div className="focus-list">{data.focus.map((item, index) => (
-            <article key={item.id} className="focus-row">
-              <button type="button" className="task-check" aria-label={`Concluir ${item.title}`}><Circle size={18} /></button>
-              <span className={`priority-dot priority-dot--${item.priority}`} />
-              <div><strong>{item.title}</strong><span>{item.project}</span></div>
-              <small className={index === 0 ? 'is-urgent' : ''}><Clock3 size={12} /> {item.dueLabel}</small>
-            </article>
-          ))}</div> : <EmptyState title="Nada urgente por agora" description="Quando uma tarefa exigir atenção, ela aparece aqui." />}
-          <footer className="focus-insight"><span className="ai-avatar"><Sparkles size={14} /></span><p><strong>Leitura do Atlas:</strong> {data.briefing}</p></footer>
-        </section>
-
-        <section className="surface activity-card">
-          <header className="section-heading"><div><span className="section-kicker"><ActivityIcon size={14} /> Atividade</span><h2>Movimentos recentes</h2></div></header>
-          {data.activities.length ? <div className="activity-list">{data.activities.map((item) => (
-            <article key={item.id}>
-              <span className={`activity-kind activity-kind--${item.kind}`}>{item.kind === 'whatsapp' ? <MessageCircle size={14} /> : item.kind === 'trello' ? <SquareKanban size={14} /> : item.kind === 'ai' ? <Sparkles size={14} /> : <Brain size={14} />}</span>
-              <div><strong>{item.title}</strong><span>{item.detail}</span></div><small>{item.at}</small>
-              <FeedbackActions itemId={item.id} context="activity" onFeedback={onFeedback} compact />
-            </article>
-          ))}</div> : <EmptyState title="Tudo quieto" description="As novas capturas e conexões aparecem aqui." />}
-        </section>
-      </div>
-
-      <section className="notes-section">
-        <header className="section-heading"><div><span className="section-kicker"><Brain size={14} /> Memória recente</span><h2>Continue de onde parou</h2></div><button className="text-link" type="button">Abrir cérebro <ArrowUpRight size={13} /></button></header>
-        {data.notes.length ? <div className="note-grid">{data.notes.slice(0, 3).map((note) => <NoteCard key={note.id} note={note} onClick={() => onSelectNote(note.id)} />)}</div> : <EmptyState title="Nenhuma nota ainda" description="Capture sua primeira ideia para começar a construir conexões." />}
-      </section>
-    </div>
-  );
-}
-
-function NoteCard({ note, onClick }: { note: WorkspaceData['notes'][number]; onClick(): void }) {
-  return (
-    <button type="button" className="note-card" onClick={onClick}>
-      <span className="note-card__meta"><span>{note.source === 'whatsapp' ? <MessageCircle size={12} /> : note.source === 'trello' ? <SquareKanban size={12} /> : <Brain size={12} />}{note.source === 'whatsapp' ? 'WhatsApp' : note.source === 'trello' ? 'Trello' : 'Nota'}</span><small>{note.updatedAt}</small></span>
-      <strong>{note.title}</strong><p>{note.excerpt}</p>
-      <span className="tag-row">{note.tags.slice(0, 2).map((tag) => <em key={tag}>#{tag}</em>)}</span>
-    </button>
-  );
-}
-
-function InboxView({ data, onSelectNote, onFeedback }: { data: WorkspaceData; onSelectNote(id: string): void; onFeedback(itemId: string, action: FeedbackAction, context: 'inbox'): void }) {
-  const items = data.inboxItems ?? data.notes;
-  if (!items.length) return <EmptyState title="Seu inbox está limpo" description="Mensagens e capturas que precisam de organização aparecerão aqui." />;
-  return (
-    <div className="inbox-layout">
-      <div className="inbox-toolbar"><span><strong>{data.stats.inbox}</strong> itens aguardando revisão</span><button className="text-link" type="button"><CheckCircle2 size={14} /> Marcar tudo como revisado</button></div>
-      <div className="inbox-list">{items.map((note, index) => (
-        <article className="inbox-item" key={note.id}>
-        <button type="button" className="inbox-row" onClick={() => onSelectNote(note.id)}>
-          <span className="inbox-unread">{index < 2 && <i />}</span>
-          <span className={`source-badge source-badge--${note.source || 'manual'}`}>{note.source === 'whatsapp' ? <MessageCircle size={15} /> : note.source === 'trello' ? <SquareKanban size={15} /> : <Brain size={15} />}</span>
-          <span className="inbox-row__content"><strong>{note.title}</strong><small>{note.excerpt}</small><span>{note.tags.map((tag) => <em key={tag}>#{tag}</em>)}</span></span>
-          <time>{note.updatedAt}</time><ChevronRight size={16} />
-        </button>
-        <FeedbackActions itemId={note.id} context="inbox" onFeedback={onFeedback} />
-        </article>
-      ))}</div>
-    </div>
-  );
-}
-
 function BrainView(props: ViewContentProps) {
+  const [noteSearch, setNoteSearch] = useState('');
+  const needle = noteSearch.trim().toLocaleLowerCase('pt-BR');
+  const visibleNotes = needle
+    ? props.data.notes.filter((item) => `${item.title} ${item.excerpt} ${item.tags.join(' ')}`.toLocaleLowerCase('pt-BR').includes(needle))
+    : props.data.notes;
   return (
     <div className="brain-layout">
       <aside className="note-browser">
-        <label className="search-field"><Search size={15} /><input placeholder="Buscar notas" /></label>
-        <div className="note-browser__heading"><span>{props.data.notes.length} notas</span><button type="button" aria-label="Ordenar notas"><Settings2 size={14} /></button></div>
+        <label className="search-field"><Search size={15} /><input value={noteSearch} onChange={(event) => setNoteSearch(event.target.value)} placeholder="Buscar notas" aria-label="Buscar notas" /></label>
+        <div className="note-browser__heading"><span>{needle ? `${visibleNotes.length} de ${props.data.notes.length}` : props.data.notes.length} notas</span></div>
         <div className="note-browser__list">
-          {props.data.notes.length ? props.data.notes.map((item) => (
+          {visibleNotes.length ? visibleNotes.map((item) => (
             <button type="button" key={item.id} className={props.selectedNoteId === item.id ? 'is-active' : ''} onClick={() => props.onSelectNote(item.id)}>
               <strong>{item.title}</strong><span>{item.excerpt}</span><small>{item.updatedAt}</small>
             </button>
-          )) : <EmptyState title="Comece uma nota" description="Suas ideias conectadas aparecerão aqui." action={<button className="button button--primary button--small" onClick={props.onNewNote}><Plus size={14} /> Nova nota</button>} />}
+          )) : needle ? <EmptyState title="Nada encontrado" description="Nenhuma nota corresponde à busca." />
+            : <EmptyState title="Comece uma nota" description="Suas ideias conectadas aparecerão aqui." action={<button className="button button--primary button--small" onClick={props.onNewNote}><Plus size={14} /> Nova nota</button>} />}
         </div>
       </aside>
       <section className="brain-editor-stage">
@@ -335,16 +258,6 @@ function AutomationsView({ data, onToggle, onCreate }: { data: WorkspaceData; on
   return <div className="automation-layout"><section className="automation-hero"><span><Bot size={22} /></span><div><h2>Rotinas que trabalham em silêncio</h2><p>Atlas observa apenas as fontes autorizadas e executa cada regra com rastreabilidade.</p></div><button className="button button--primary button--small" type="button" onClick={() => setCreating((value) => !value)}><Plus size={14} /> Nova automação</button></section>{creating && <section className="automation-creator" aria-label="Criar automação"><label><span>Tipo de rotina</span><select value={kind} onChange={(event) => setKind(event.target.value as typeof kind)}><option value="briefing">Briefing pessoal</option><option value="deadline">Prazo próximo</option><option value="overdue">Item vencido</option><option value="follow_up">Resposta pendente</option><option value="stale_task">Tarefa parada</option><option value="weekly_review">Revisão semanal</option></select></label>{['briefing', 'weekly_review'].includes(kind) && <label><span>Horário</span><input type="time" value={time} onChange={(event) => setTime(event.target.value)} /></label>}<button type="button" className="button button--primary button--small" onClick={() => { onCreate({ kind, ...(['briefing', 'weekly_review'].includes(kind) ? { time } : {}) }); setCreating(false); }}>Criar rotina</button><button type="button" className="button button--ghost button--small" onClick={() => setCreating(false)}>Cancelar</button></section>}<AiUsagePanel usage={data.aiUsage} />{data.automations.length ? <div className="automation-list">{data.automations.map((automation) => (
     <article key={automation.id}><span className={`automation-icon automation-icon--${automation.status}`}><Bot size={18} /></span><div><strong>{automation.name}</strong><p>{automation.description}</p><small><Wifi size={12} /> {automation.lastRun ? `Última execução: ${automation.lastRun}` : 'Ainda não executada'}</small></div><span className={`status-pill status-pill--${automation.status}`}>{automation.status === 'healthy' ? 'Saudável' : automation.status === 'attention' ? 'Atenção' : 'Pausada'}</span><label className="switch"><input type="checkbox" checked={automation.enabled} onChange={(event) => onToggle(automation.id, event.target.checked)} /><span /></label><button className="icon-button"><MoreHorizontal size={16} /></button></article>
   ))}</div> : <EmptyState title="Nenhuma automação criada" description="Crie uma rotina suportada para agir no momento certo." />}</div>;
-}
-
-function FeedbackActions({ itemId, context, onFeedback, compact = false }: { itemId: string; context: 'inbox' | 'activity'; onFeedback(itemId: string, action: FeedbackAction, context: 'inbox' | 'activity'): void; compact?: boolean }) {
-  const actions = [
-    { id: 'edit' as const, label: 'Editar', icon: Pencil },
-    { id: 'not_task' as const, label: 'Não é tarefa', icon: Ban },
-    { id: 'merge' as const, label: 'Mesclar', icon: Merge },
-    { id: 'reprocess' as const, label: 'Reprocessar', icon: RefreshCw },
-  ];
-  return <div className={`feedback-actions ${compact ? 'feedback-actions--compact' : ''}`} aria-label="Corrigir interpretação da IA">{actions.map((action) => { const Icon = action.icon; return <button type="button" key={action.id} onClick={() => onFeedback(itemId, action.id, context)}><Icon size={compact ? 11 : 12} /><span>{action.label}</span></button>; })}</div>;
 }
 
 function AiUsagePanel({ usage }: { usage: WorkspaceData['aiUsage'] }) {

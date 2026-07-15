@@ -9,6 +9,7 @@ export type NotificationKind =
   | "reminder"
   | "welcome"
   | "admin_message"
+  | "proactive_question"
   | "integration_error";
 
 export interface Notification {

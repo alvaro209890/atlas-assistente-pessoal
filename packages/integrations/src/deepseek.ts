@@ -46,6 +46,9 @@ export interface AssistantConversationInput {
     dueAt: string | null;
   }[];
   memories: readonly { title: string; content: string }[];
+  reminders?: readonly { title: string; scheduledFor: string | null }[];
+  commitments?: readonly { title: string; direction: string; counterpart: string | null; dueAt: string | null }[];
+  learnings?: readonly string[];
 }
 
 const OUTPUT_EXAMPLE = {
@@ -243,6 +246,36 @@ export function normalizeDeepSeekDecision(value: unknown): unknown {
   decision.actionProposals = asArray(decision.actionProposals).filter((item) =>
     typeof item.clientRef === "string" && typeof item.title === "string" && Array.isArray(item.evidenceMessageIds),
   );
+  // O schema de classificação é estrito; chaves extras (ex.: classificationType),
+  // confidence textual ou campos ausentes não podem invalidar a decisão inteira.
+  // Classificação é opcional: quando incompleta, o destino seguro é null.
+  if (decision.conversationClassification && typeof decision.conversationClassification === "object" && !Array.isArray(decision.conversationClassification)) {
+    const classification = decision.conversationClassification as Record<string, unknown>;
+    const confidence = typeof classification.confidence === "string" && classification.confidence.trim() !== ""
+      ? Number(classification.confidence)
+      : classification.confidence;
+    const evidenceMessageIds = Array.isArray(classification.evidenceMessageIds)
+      ? classification.evidenceMessageIds.filter((value): value is string => typeof value === "string" && value.trim() !== "")
+      : [];
+    decision.conversationClassification =
+      typeof classification.groupId === "string" && classification.groupId.trim() !== ""
+      && typeof confidence === "number" && Number.isFinite(confidence)
+      && typeof classification.reason === "string" && classification.reason.trim() !== ""
+      && evidenceMessageIds.length > 0
+        ? { groupId: classification.groupId, confidence, reason: classification.reason, evidenceMessageIds }
+        : null;
+  }
+  // priority tem enum low|normal|high|urgent; o modelo confunde com o enum de
+  // risk (medium) ou responde em português. Aliases não criam novos níveis.
+  const priorityAliases: Record<string, string> = {
+    medium: "normal", media: "normal", moderada: "normal", padrao: "normal",
+    baixa: "low", baixo: "low", alta: "high", alto: "high",
+    urgente: "urgent", critica: "urgent", critico: "urgent", critical: "urgent",
+  };
+  decision.tasks = (decision.tasks as Record<string, unknown>[]).map((task) => {
+    const priority = normalizedToken(task.priority);
+    return priorityAliases[priority] ? { ...task, priority: priorityAliases[priority] } : task;
+  });
   if (typeof decision.conversationSummary !== "string" || !decision.conversationSummary.trim()) decision.conversationSummary = "Conversa analisada pelo Atlas.";
   if (typeof decision.briefReason !== "string" || !decision.briefReason.trim()) decision.briefReason = "Saída da IA normalizada com segurança.";
   const intentAliases: Record<string, string> = {
@@ -349,6 +382,9 @@ export class DeepSeekDecisionClient {
       user_name: input.preferredName,
       current_tasks: input.tasks,
       relevant_memories: input.memories,
+      scheduled_reminders: input.reminders ?? [],
+      open_commitments: input.commitments ?? [],
+      confirmed_preferences: input.learnings ?? [],
     });
     const body = {
       model: this.model,
@@ -357,7 +393,7 @@ export class DeepSeekDecisionClient {
           role: "system",
           content: `Você é Atlas, o assistente pessoal do usuário no WhatsApp. Converse em português brasileiro de forma humana, direta e útil.
 
-Você conhece o contexto operacional fornecido abaixo e pode ajudar a planejar, consultar e organizar a rotina. Ordens explícitas sobre tarefas são processadas por um executor separado. Nunca afirme que concluiu, criou, alterou ou cancelou algo antes de receber confirmação desse executor. Quando a pessoa der uma ordem, reconheça de modo breve que irá processá-la. Não invente tarefas, prazos, fatos ou ações. Não exponha IDs internos. Se faltar uma referência essencial, faça uma única pergunta objetiva.
+Você conhece o contexto operacional fornecido abaixo (tarefas, lembretes, compromissos, preferências confirmadas e memórias) e pode ajudar a planejar, consultar e organizar a rotina com base nele. Ordens explícitas sobre tarefas são processadas por um executor separado. Nunca afirme que concluiu, criou, alterou ou cancelou algo antes de receber confirmação desse executor. Quando a pessoa der uma ordem, reconheça de modo breve que irá processá-la. Não invente tarefas, prazos, fatos ou ações. Não exponha IDs internos. Respeite as preferências confirmadas listadas. Se faltar uma referência essencial, faça uma única pergunta objetiva.
 
 CONTEXTO OPERACIONAL:
 ${operationalContext}`,

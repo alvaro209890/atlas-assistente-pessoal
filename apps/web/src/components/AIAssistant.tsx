@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowUp, Bot, Check, FileText, MessageCircle, PanelRightClose, Pencil, Plus, Repeat2, Sparkles, SquareKanban, X } from 'lucide-react';
+import { ArrowUp, Bot, Check, FileText, History, MessageCircle, PanelRightClose, Pencil, Plus, Repeat2, Sparkles, SquareKanban, X } from 'lucide-react';
 import type { AppApi } from '../api';
-import type { ActionProposal, AiMessage, AiSource, AssistantTask, NavId, ProposalAction } from '../types';
+import type { ActionProposal, AiMessage, AiSource, AssistantTask, ChatThreadSummary, NavId, ProposalAction } from '../types';
 import { Spinner } from './ui';
 
 interface AIAssistantProps {
@@ -59,6 +59,8 @@ export function AIAssistant({ api, view, noteId, mobileOpen, tasks = [], onMobil
   const [proposalRecurrence, setProposalRecurrence] = useState('');
   const [proposalTaskId, setProposalTaskId] = useState('');
   const [proposalMergeTargetId, setProposalMergeTargetId] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [threads, setThreads] = useState<ChatThreadSummary[] | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -87,6 +89,32 @@ export function AIAssistant({ api, view, noteId, mobileOpen, tasks = [], onMobil
     setMessages(initialMessages);
     setError(null);
     setDraft('');
+    setHistoryOpen(false);
+  };
+
+  const toggleHistory = () => {
+    setHistoryOpen((open) => {
+      const next = !open;
+      if (next) {
+        void api.listChatThreads()
+          .then((items) => setThreads(items))
+          .catch(() => setThreads([]));
+      }
+      return next;
+    });
+  };
+
+  const openThread = async (thread: ChatThreadSummary) => {
+    setHistoryOpen(false);
+    if (thread.id === threadId) return;
+    try {
+      const history = await api.getChatMessages(thread.id);
+      setThreadId(thread.id);
+      setMessages(history.length ? history : initialMessages);
+      setError(null);
+    } catch {
+      setError('Não foi possível abrir esta conversa.');
+    }
   };
 
   const send = async (event?: FormEvent) => {
@@ -171,10 +199,23 @@ export function AIAssistant({ api, view, noteId, mobileOpen, tasks = [], onMobil
       <header className="ai-panel__header">
         <div><span className="ai-avatar"><Sparkles size={17} /></span><span><strong>Assistente Atlas</strong><small><i /> Contexto ativo</small></span></div>
         <div className="ai-panel__header-actions">
+          <button className="icon-button" type="button" onClick={toggleHistory} title="Conversas anteriores" aria-label="Conversas anteriores" aria-expanded={historyOpen}><History size={16} /></button>
           <button className="icon-button" type="button" onClick={startNewChat} title="Nova conversa" aria-label="Nova conversa"><Plus size={17} /></button>
           <button className="icon-button ai-mobile-close" type="button" onClick={onMobileClose} aria-label="Fechar assistente"><PanelRightClose size={18} /></button>
         </div>
       </header>
+      {historyOpen && (
+        <div className="ai-thread-menu" role="menu" aria-label="Conversas anteriores">
+          <header>Conversas anteriores</header>
+          {threads === null ? <p className="ai-thread-menu__empty">Carregando…</p>
+            : threads.length ? threads.slice(0, 20).map((thread) => (
+              <button key={thread.id} type="button" className={`ai-thread-item ${thread.id === threadId ? 'is-active' : ''}`} onClick={() => void openThread(thread)}>
+                <strong>{thread.title || 'Conversa sem título'}</strong>
+                <small>{new Date(thread.updatedAt).toLocaleString('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</small>
+              </button>
+            )) : <p className="ai-thread-menu__empty">Nenhuma conversa anterior ainda.</p>}
+        </div>
+      )}
       <div className="ai-context-strip"><Bot size={14} /><span>Respondendo com base no seu segundo cérebro</span></div>
       <div className="ai-thread" aria-live="polite">
         {messages.map((message) => (
