@@ -600,12 +600,15 @@ export class WorkerRepository implements BaileysAuthRepository, SelectedChatRepo
     status: MessageBatchStatus,
     error?: unknown,
   ): Promise<void> {
+    // Um job atrasado/duplicado nunca pode rebaixar um lote já concluído
+    // (ex.: cancelamento por chat desativado depois que o lote completou).
     await this.database.query(
       `UPDATE message_batches SET status = $3,
          attempt_count = CASE WHEN $3 = 'processing' THEN attempt_count + 1 ELSE attempt_count END,
          completed_at = CASE WHEN $3 = 'completed' THEN now() ELSE completed_at END,
          last_error = $4
-       WHERE user_id = $1 AND id = $2`,
+       WHERE user_id = $1 AND id = $2
+         AND NOT (status = 'completed' AND $3 IN ('cancelled', 'failed'))`,
       [
         userId,
         batchId,

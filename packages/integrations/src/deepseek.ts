@@ -364,9 +364,25 @@ export class DeepSeekDecisionClient {
       throw new InvalidAiOutputError(`DeepSeek JSON failed schema validation: ${parsed.error.message}`);
     }
 
+    // Classificação de conversa é opcional e só vale quando o contexto permite.
+    // Uma classificação fora de hora (não elegível, grupo desconhecido ou sem
+    // evidência válida) é descartada em vez de derrubar o lote inteiro.
+    const decision = parsed.data;
+    if (decision.conversationClassification) {
+      const eligible = context.conversationClassification?.eligible === true;
+      const knownMessageIds = new Set(context.messages.map((message) => message.id));
+      const evidenceMessageIds = decision.conversationClassification.evidenceMessageIds
+        .filter((id) => knownMessageIds.has(id));
+      const groupAllowed = (context.conversationGroups ?? [])
+        .some((group) => group.id === decision.conversationClassification?.groupId);
+      decision.conversationClassification = eligible && groupAllowed && evidenceMessageIds.length > 0
+        ? { ...decision.conversationClassification, evidenceMessageIds }
+        : null;
+    }
+
     const usage = completion.usage as DeepSeekUsage | undefined;
     return {
-      decision: parsed.data,
+      decision,
       usage: {
         promptTokens: usage?.prompt_tokens ?? 0,
         completionTokens: usage?.completion_tokens ?? 0,
