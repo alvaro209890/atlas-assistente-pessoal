@@ -189,6 +189,8 @@ function makeRepository() {
   const batchStatuses: string[] = [];
 
   const repository = {
+    isSelected: vi.fn(async () => true),
+    isSelfChat: vi.fn(async () => false),
     updateBatchStatus: vi.fn(async (_userId: string, _batchId: string, status: string) => {
       batchStatuses.push(status);
     }),

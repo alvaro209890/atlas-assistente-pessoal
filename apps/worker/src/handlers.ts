@@ -199,6 +199,20 @@ export async function registerHandlers(dependencies: HandlerDependencies): Promi
       const payload = job.data;
       let runId: string | null = null;
       try {
+        // A escolha de monitoramento vale também na hora de processar: se a
+        // conversa foi desativada depois do enfileiramento, o lote é
+        // cancelado em vez de gastar IA com um chat que o dono ignorou.
+        const stillMonitored = await repository.isSelected(payload.userId, payload.chatJid)
+          || await repository.isSelfChat(payload.userId, payload.chatJid);
+        if (!stillMonitored) {
+          await repository.updateBatchStatus(
+            payload.userId,
+            payload.batchId,
+            "cancelled",
+            "Conversa fora do monitoramento no momento do processamento",
+          );
+          continue;
+        }
         await repository.updateBatchStatus(payload.userId, payload.batchId, "processing");
         await syncTrelloSnapshot(repository, payload.userId).catch(() => undefined);
         const context = await repository.buildContext(

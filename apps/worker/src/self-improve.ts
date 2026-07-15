@@ -64,9 +64,16 @@ export async function collectFailedBatchesForRequeue(
   limit = MAX_REQUEUED_BATCHES_PER_SWEEP,
 ): Promise<RequeuedBatch[]> {
   const batches = await repository.database.query<BatchRow>(
-    `SELECT id,user_id,chat_jid,batch_key FROM message_batches
-     WHERE status='failed' AND attempt_count<$1
-     ORDER BY window_ends_at DESC LIMIT $2`,
+    `SELECT mb.id,mb.user_id,mb.chat_jid,mb.batch_key FROM message_batches mb
+     WHERE mb.status='failed' AND mb.attempt_count<$1
+       AND EXISTS (
+         SELECT 1 FROM monitored_chats mc
+         WHERE mc.user_id=mb.user_id AND mc.jid=mb.chat_jid AND mc.enabled=true
+         UNION ALL
+         SELECT 1 FROM whatsapp_connections wc
+         WHERE wc.user_id=mb.user_id AND wc.self_jid=mb.chat_jid
+       )
+     ORDER BY mb.window_ends_at DESC LIMIT $2`,
     [MAX_BATCH_ATTEMPTS, limit],
   );
   const jobs: RequeuedBatch[] = [];
