@@ -239,8 +239,12 @@ const replyObjectiveValues = [
  * caso canônico "sem resposta", preservando um reply bem-formado quando existe.
  */
 export const aiReplySchema = z.preprocess((value) => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-  const raw = value as Record<string, unknown>;
+  // O reply é apenas uma sugestão exibida ao dono; QUALQUER forma malformada
+  // (null, ausente, string, array) vira "sem resposta" em vez de invalidar a
+  // decisão inteira do lote.
+  const raw = (!value || typeof value !== "object" || Array.isArray(value)
+    ? {}
+    : value) as Record<string, unknown>;
   const confidence = typeof raw.confidence === "number" ? raw.confidence : 0;
   const draft = typeof raw.draft === "string" ? raw.draft.trim() : "";
   const tone = typeof raw.tone === "string" ? raw.tone.trim() : "";
